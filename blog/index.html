@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blog – Arjun Kanojia | DevOps, SRE and Platform Engineering</title>
+<meta name="description" content="Notes from Arjun Kanojia, a DevOps and Site Reliability Engineer, on running AWS and Kubernetes platforms: reliability, scaling, cost, CI/CD and platform engineering.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="Blog – Arjun Kanojia">
+<meta property="og:description" content="Notes on running AWS and Kubernetes platforms in production.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Blog",
+  "@id": "https://arjunkanojia.com/blog/#blog",
+  "name": "Arjun Kanojia's blog",
+  "url": "https://arjunkanojia.com/blog/",
+  "inLanguage": "en",
+  "author": {"@id": "https://arjunkanojia.com/#person", "@type": "Person", "name": "Arjun Kanojia"}
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+  <section class="intro">
+    <span class="eyebrow">Blog</span>
+    <h1>Notes from running platforms</h1>
+    <p>I write about what I've learned building and running AWS and Kubernetes platforms: reliability, scaling, cost, delivery and the platform work in between. A new post most weeks.</p>
+  </section>
+
+  <ul class="posts">
+    <!-- POSTS:START -->
+    <li>
+      <time datetime="2026-11-16">16 November 2026</time>
+      <h2><a href="/blog/eks-1-34-end-of-support-upgrade-playbook/">EKS 1.34 end of standard support: a zero-downtime upgrade playbook</a></h2>
+      <p>EKS 1.34 leaves standard support on 2 December 2026. What extended support really costs, the upgrade policy switch, in-place versus blue/green, the 1.35 to 1.37 changes that break workloads, Karpenter node rotation with disruption budgets, failure modes and a two-week plan.</p>
+      <div class="tags"><span>Kubernetes</span><span>EKS upgrades</span><span>Reliability</span><span>Karpenter</span></div>
+    </li>
+    <li>
+      <time datetime="2026-11-09">9 November 2026</time>
+      <h2><a href="/blog/mcp-server-security-supply-chain-eks/">MCP servers are supply chain: securing the agent tool layer on EKS</a></h2>
+      <p>What the 2026 MCP CVEs have in common and how to run MCP servers on EKS like any production dependency: a gateway with audience-bound tokens, EKS Pod Identity, signed and pinned images, default-deny egress, tool-definition drift checks, OPA policy, the OWASP MCP Top 10 mapped to controls and a CVE runbook.</p>
+      <div class="tags"><span>AI security</span><span>MCP</span><span>Supply chain</span><span>EKS</span></div>
+    </li>
+    <li>
+      <time datetime="2026-11-02">2 November 2026</time>
+      <h2><a href="/blog/llm-inference-eks-kubernetes-1-37/">Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing</a></h2>
+      <p>A practical design for GPU inference on EKS 1.37: GPUs as DRA ResourceClaims with Karpenter, MIG versus time-slicing, InferencePool routing with an endpoint picker, HPA scale-to-zero and where cold-start minutes go, gang scheduling on EKS, device taints and a rollout checklist.</p>
+      <div class="tags"><span>AI platform</span><span>Kubernetes</span><span>GPU inference</span><span>EKS</span></div>
+    </li>
+    <li>
+      <time datetime="2026-10-26">26 October 2026</time>
+      <h2><a href="/blog/agentic-developer-platform-golden-paths/">From IDP to agentic developer platform: golden paths as contracts agents can run</a></h2>
+      <p>How to let AI agents use an internal developer platform without bypassing it: golden paths as contracts, Backstage MCP actions, Crossplane v2 XRDs with CEL rules, deterministic validation gates, Kargo promotions, autonomy levels per path and a 60-day plan.</p>
+      <div class="tags"><span>Platform engineering</span><span>AI agents</span><span>Backstage</span><span>GitOps</span></div>
+    </li>
+    <li>
+      <time datetime="2026-10-19">19 October 2026</time>
+      <h2><a href="/blog/ai-sre-agents-incident-response/">AI SRE agents on call: an autonomy ladder for incident response</a></h2>
+      <p>What an AI agent should be allowed to do during an incident, level by level: read-only Kubernetes and AWS identities, an action catalogue gated by OPA policy, approval flows, the ways these agents fail, metrics for promotion and a 90-day rollout plan.</p>
+      <div class="tags"><span>AI agents</span><span>Incident response</span><span>SRE</span><span>Policy as code</span></div>
+    </li>
+    <li>
+      <time datetime="2026-10-12">12 October 2026</time>
+      <h2><a href="/blog/ai-agents-terraform-guardrails/">Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates</a></h2>
+      <p>Agents can write your Terraform, but they should not approve it. A layered design: a workspace with no cloud credentials, plan-only and apply-only OIDC roles on AWS, OPA policy on the plan JSON, GitLab CI approval gates, autonomy tiers and nightly drift detection.</p>
+      <div class="tags"><span>AI agents</span><span>Terraform</span><span>Policy as code</span><span>GitLab CI</span></div>
+    </li>
+    <li>
+      <time datetime="2026-10-08">8 October 2026</time>
+      <h2><a href="/blog/peak-traffic-lessons-fifa-world-cup-2026/">Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills</a></h2>
+      <p>A full playbook for a traffic spike on an Akamai, EKS and EC2 stack: k6 load tests that find the knee, KEDA and Karpenter pre-scaling, sizing MongoDB, Kafka, Aerospike and RDS, DR by RTO/RPO, backup-restore and failover drills.</p>
+      <div class="tags"><span>Reliability</span><span>Karpenter</span><span>KEDA</span><span>Disaster recovery</span></div>
+    </li>
+    <!-- POSTS:END -->
+  </ul>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>

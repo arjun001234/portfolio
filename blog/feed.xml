@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>Arjun Kanojia's blog</title>
+  <link>https://arjunkanojia.com/blog/</link>
+  <atom:link href="https://arjunkanojia.com/blog/feed.xml" rel="self" type="application/rss+xml"/>
+  <description>Notes on running AWS and Kubernetes platforms in production.</description>
+  <language>en</language>
+  <lastBuildDate>Mon, 16 Nov 2026 07:00:00 +0530</lastBuildDate>
+  <!-- ITEMS:START -->
+  <item>
+    <title>EKS 1.34 end of standard support: a zero-downtime upgrade playbook</title>
+    <link>https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/</link>
+    <guid>https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/</guid>
+    <pubDate>Mon, 16 Nov 2026 07:00:00 +0530</pubDate>
+    <description>EKS 1.34 leaves standard support on 2 December 2026: the cost of extended support, the cluster upgrade policy, in-place versus blue/green, the Kubernetes 1.35 to 1.37 changes that break workloads, Karpenter node rotation with disruption budgets, failure modes and a two-week plan.</description>
+  </item>
+  <item>
+    <title>MCP servers are supply chain: securing the agent tool layer on EKS</title>
+    <link>https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/</link>
+    <guid>https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/</guid>
+    <pubDate>Mon, 09 Nov 2026 07:00:00 +0530</pubDate>
+    <description>Running MCP servers on EKS as production dependencies: the 2026 MCP CVE patterns, an MCP gateway with audience-bound tokens, EKS Pod Identity, signed and pinned images, default-deny egress, tool-definition drift detection, OPA policy, the OWASP MCP Top 10 and a CVE runbook.</description>
+  </item>
+  <item>
+    <title>Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing</title>
+    <link>https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/</link>
+    <guid>https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/</guid>
+    <pubDate>Mon, 02 Nov 2026 07:00:00 +0530</pubDate>
+    <description>GPU inference on EKS with Kubernetes 1.37: DRA ResourceClaims with Karpenter, MIG versus time-slicing, Gateway API Inference Extension routing, HPA scale-to-zero and cold starts, gang scheduling status, device taints, failure modes and a rollout checklist.</description>
+  </item>
+  <item>
+    <title>From IDP to agentic developer platform: golden paths as contracts agents can run</title>
+    <link>https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/</link>
+    <guid>https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/</guid>
+    <pubDate>Mon, 26 Oct 2026 07:00:00 +0530</pubDate>
+    <description>Turning golden paths into contracts AI agents can run: Backstage MCP actions, Crossplane v2 XRDs, deterministic validation gates, Kargo promotions with pull requests and verification, autonomy levels per path, failure modes, metrics and a 60-day plan.</description>
+  </item>
+  <item>
+    <title>AI SRE agents on call: an autonomy ladder for incident response</title>
+    <link>https://arjunkanojia.com/blog/ai-sre-agents-incident-response/</link>
+    <guid>https://arjunkanojia.com/blog/ai-sre-agents-incident-response/</guid>
+    <pubDate>Mon, 19 Oct 2026 07:00:00 +0530</pubDate>
+    <description>Where an AI agent belongs in incident response: a five-level autonomy ladder, read-only Kubernetes and AWS identities, an action catalogue gated by OPA policy, failure modes, promotion metrics and a 90-day rollout plan.</description>
+  </item>
+  <item>
+    <title>Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates</title>
+    <link>https://arjunkanojia.com/blog/ai-agents-terraform-guardrails/</link>
+    <guid>https://arjunkanojia.com/blog/ai-agents-terraform-guardrails/</guid>
+    <pubDate>Mon, 12 Oct 2026 07:00:00 +0530</pubDate>
+    <description>A guardrail design for AI agents that write Terraform: no cloud credentials in the agent workspace, plan-only and apply-only OIDC roles, OPA policy on the plan JSON, GitLab CI approval gates, autonomy tiers by blast radius and drift detection.</description>
+  </item>
+  <item>
+    <title>Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills</title>
+    <link>https://arjunkanojia.com/blog/peak-traffic-lessons-fifa-world-cup-2026/</link>
+    <guid>https://arjunkanojia.com/blog/peak-traffic-lessons-fifa-world-cup-2026/</guid>
+    <pubDate>Thu, 08 Oct 2026 12:00:00 +0530</pubDate>
+    <description>Akamai, EKS, MongoDB, Kafka, Aerospike and RDS under a traffic spike: k6 load testing, KEDA and Karpenter pre-scaling, DR strategies, backup-restore and failover drills, and an event-day runbook.</description>
+  </item>
+  <!-- ITEMS:END -->
+</channel>
+</rss>
