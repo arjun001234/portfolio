@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>From IDP to agentic developer platform: golden paths as contracts agents can run | Arjun Kanojia</title>
+<meta name="description" content="How to turn an internal developer platform into one that AI agents can safely use: golden paths as machine-executable contracts with Backstage MCP actions, Crossplane v2 XRDs, deterministic validation gates, Kargo promotions, autonomy levels per path, failure modes, metrics and a 60-day plan.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="From IDP to agentic developer platform: golden paths as contracts agents can run">
+<meta property="og:description" content="Agents are becoming your platform's busiest users. How to turn golden paths into contracts they can run: Backstage MCP actions, Crossplane XRDs, deterministic gates, Kargo promotions and autonomy levels per path.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/">
+<meta property="og:image" content="https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="From IDP to agentic developer platform: golden paths as contracts agents can run. Blog post by Arjun Kanojia.">
+<meta property="article:published_time" content="2026-10-26">
+<meta property="article:modified_time" content="2026-10-26">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/og.png">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<style>.prose .svgscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.prose .svgscroll svg{min-width:640px}</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "From IDP to agentic developer platform: golden paths as contracts agents can run",
+  "description": "A practical design for letting AI agents use an internal developer platform: golden paths as machine-executable contracts, Backstage MCP actions, Crossplane v2 XRDs, deterministic validation gates, Kargo promotions, autonomy levels per path, failure modes, metrics and a 60-day plan.",
+  "image": "https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/og.png",
+  "datePublished": "2026-10-26",
+  "dateModified": "2026-10-26",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/agentic-developer-platform-golden-paths/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "platform engineering, internal developer platform, agentic developer platform, golden paths, AI agents, Backstage, MCP, Crossplane, Argo CD, Kargo, GitOps, OPA, conftest, DORA, multi-tenant EKS"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">Platform engineering · October 2026</span>
+    <h1>From IDP to agentic developer platform: golden paths as contracts agents can run</h1>
+    <p class="dek">Internal developer platforms were designed for people clicking through a portal. More and more of the callers are now coding agents, review bots and AI SRE tools. This is how I'd turn golden paths into contracts those agents can run, without giving them a way around the guardrails the platform exists to enforce.</p>
+    <div class="meta"><time datetime="2026-10-26">26 October 2026</time> · 16 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#why">Why agents change who your platform is for</a></li>
+        <li><a href="#contract">A golden path is a contract, not a wizard</a></li>
+        <li><a href="#layers">The three-layer architecture</a></li>
+        <li><a href="#tools">Exposing golden paths as tools</a></li>
+        <li><a href="#schema">Put the rules in the schema</a></li>
+        <li><a href="#loop">The validation loop: probabilistic step, deterministic gate</a></li>
+        <li><a href="#promote">Promotion: where agent changes meet production</a></li>
+        <li><a href="#autonomy">Autonomy levels per path, not per agent</a></li>
+        <li><a href="#identity">Identity, tenancy and audit</a></li>
+        <li><a href="#failure">How agentic platforms fail</a></li>
+        <li><a href="#measure">Measuring it</a></li>
+        <li><a href="#plan">A 60-day plan and checklist</a></li>
+      </ol>
+    </nav>
+
+    <p>In my current role at Deutsche Telekom Digital Labs I work on an internal developer platform built from fairly standard parts: Backstage software templates, Crossplane for infrastructure, Argo CD for GitOps, Kargo for promotions between environments, and multi-tenant EKS where every team gets observability by default. I also use agentic AI every week to create and maintain Terraform.</p>
+    <p>Put those two things side by side and one question keeps coming up. The platform has carefully designed golden paths for humans. The agents don't use them. They write YAML and HCL straight into repositories, skip the template, and leave reviewers to work out whether the result matches what the golden path would have produced. That's backwards. The golden path should be the easiest route for an agent too, and the safest.</p>
+    <p>This post is the design I'd use to get there. None of it needs a new product. It's mostly about treating each golden path as a contract with a strict input schema, deterministic checks and a clear owner, and then letting agents call that contract instead of improvising.</p>
+
+    <h2 id="why">1. Why agents change who your platform is for</h2>
+    <p>The <a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" rel="noopener">2025 DORA report</a> found that 90% of respondents use AI at work, and that AI adoption now goes with higher delivery throughput but <em>lower</em> delivery stability. DORA's summary is that AI is an amplifier: it makes a good system faster and a weak one more fragile. The same report says 90% of organisations now have at least one internal platform, and DORA's <a href="https://cloud.google.com/blog/products/ai-machine-learning/introducing-doras-inaugural-ai-capabilities-model" rel="noopener">AI Capabilities Model</a> names "quality internal platforms" as one of seven capabilities that amplify AI's positive effect, because the platform supplies the guardrails and shared capabilities that let AI scale safely.</p>
+    <p>Read that from a platform team's side. If agents write more changes, faster, the platform is the only place you can put consistent controls in front of all of them. Code review alone won't hold when the change volume doubles.</p>
+    <p>The industry is converging on a name for this. PlatformEngineering.org is running a course this month on evolving an IDP into an <a href="https://university.platformengineering.org/agentic-development-platforms-october-2026" rel="noopener">"agentic development platform"</a>, built around golden paths as machine-executable contracts and a loop of a probabilistic step followed by a deterministic gate. KubeCon North America in Salt Lake City (9 to 12 November) has a Platform Engineering track and a new <a href="https://www.cncf.io/announcements/2026/08/10/cncf-reveals-kubecon-cloudnativecon-north-america-2026-schedule-adds-new-ai-inference-agentic-track/" rel="noopener">AI Inference + Agentic track</a>. The tooling has caught up too: Backstage can now expose plugin actions over MCP, Crossplane v2 makes namespaced composite resources the default, and Kargo has pull-request and approval steps built into promotions.</p>
+
+    <h2 id="contract">2. A golden path is a contract, not a wizard</h2>
+    <p>Most golden paths today are wizards. A form asks a few questions, a template renders some files, and the knowledge of what's allowed lives partly in the form and partly in the heads of the platform team. A human fills in the gaps. An agent will fill them in too, just not always correctly.</p>
+    <p>A contract makes the gaps explicit. For each path you write down what it accepts, what it guarantees, how it's checked and who owns it. The <a href="https://tag-app-delivery.cncf.io/whitepapers/platform-eng-maturity-model/" rel="noopener">CNCF Platform Engineering Maturity Model</a> already pushes platforms towards self-service through well-defined interfaces. Agents just make that requirement strict.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Aspect</th><th>Golden path as a wizard (for humans)</th><th>Golden path as a contract (for humans and agents)</th></tr></thead>
+      <tbody>
+        <tr><td>Inputs</td><td>Form fields, loose validation, defaults in the UI</td><td>A versioned schema with types, enums, ranges and cross-field rules</td></tr>
+        <tr><td>Guarantees</td><td>Implied by the template</td><td>Written down: "critical tier means Multi-AZ, 14-day backups, deletion protection"</td></tr>
+        <tr><td>Checks</td><td>Code review</td><td>Deterministic gates in CI that return machine-readable errors</td></tr>
+        <tr><td>Side effects</td><td>Sometimes direct API calls from the portal</td><td>Only a Git merge request; GitOps applies it</td></tr>
+        <tr><td>Discovery</td><td>A catalogue page people browse</td><td>A tool with a name, description and schema that an agent can list</td></tr>
+        <tr><td>Ownership</td><td>"The platform team"</td><td>A named owning team, an SLO for the path, a changelog</td></tr>
+        <tr><td>Autonomy</td><td>Not a question</td><td>Set per path: draft only, run with approval, or auto-merge within policy</td></tr>
+      </tbody>
+    </table></div>
+    <p>If that looks like an API, it is. The useful mental shift is that your platform already has an API, it's just spread across templates, Helm charts, Terraform modules and wiki pages. Agents force you to make it a real one.</p>
+
+    <h2 id="layers">3. The three-layer architecture</h2>
+    <p>Here's the reference layout I'd draw. At the bottom are the usual IDP planes. On top of them sits a thin layer of command paths, which are the golden path contracts. On top of that sits agent infrastructure, the part that's new. Humans keep using the portal; agents come in through a tool gateway, and both end up in the same command paths.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 520" role="img" aria-label="Three-layer agentic developer platform. At the top, callers: a developer in the Backstage portal, an IDE coding agent, a CI review agent and an AI SRE agent. Agents pass through an agent infrastructure layer with a tool gateway using MCP, agent identity via OIDC, OPA policy, context from the catalog and docs, and traces and evals with OpenTelemetry. Humans go straight to the command paths layer, which holds the golden path contracts: Backstage templates and actions, Crossplane composite resources, Kargo promotions and runbook actions. Command paths write only through Git merge requests into the IDP planes: developer control plane, integration and delivery with GitLab CI and Argo CD, the resource plane on EKS and AWS, monitoring and logging, and security." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <text x="20" y="22" fill="#8B97A6" font-size="11" font-weight="600">CALLERS</text>
+        <rect x="20" y="32" width="170" height="44" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="105" y="52" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">Developer</text><text x="105" y="68" text-anchor="middle" fill="#8B97A6" font-size="10.5">Backstage portal UI</text>
+        <rect x="205" y="32" width="170" height="44" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="290" y="52" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">IDE coding agent</text><text x="290" y="68" text-anchor="middle" fill="#8B97A6" font-size="10.5">writes app + config changes</text>
+        <rect x="390" y="32" width="170" height="44" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="475" y="52" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">CI / review agent</text><text x="475" y="68" text-anchor="middle" fill="#8B97A6" font-size="10.5">fixes failed gates, upgrades</text>
+        <rect x="575" y="32" width="165" height="44" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="657" y="52" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">AI SRE agent</text><text x="657" y="68" text-anchor="middle" fill="#8B97A6" font-size="10.5">runbook actions only</text>
+        <line x1="290" y1="76" x2="290" y2="106" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a1)"/>
+        <line x1="475" y1="76" x2="475" y2="106" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a1)"/>
+        <line x1="657" y1="76" x2="657" y2="106" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a1)"/>
+        <path d="M105,76 L105,92 L12,92 L12,250 L28,250" fill="none" stroke="#7CA7FF" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a1)"/>
+        <rect x="160" y="108" width="580" height="104" rx="14" fill="none" stroke="#FF9E6D" stroke-dasharray="6 5"/>
+        <text x="176" y="128" fill="#FF9E6D" font-size="11" font-weight="600">AGENT INFRASTRUCTURE (new)</text>
+        <rect x="176" y="140" width="106" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="229" y="163" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Tool gateway</text><text x="229" y="181" text-anchor="middle" fill="#8B97A6" font-size="10">MCP, allowlist</text>
+        <rect x="290" y="140" width="106" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="343" y="163" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Agent identity</text><text x="343" y="181" text-anchor="middle" fill="#8B97A6" font-size="10">OIDC, per agent</text>
+        <rect x="404" y="140" width="106" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="457" y="163" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Policy</text><text x="457" y="181" text-anchor="middle" fill="#8B97A6" font-size="10">OPA, autonomy</text>
+        <rect x="518" y="140" width="106" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="571" y="163" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Context</text><text x="571" y="181" text-anchor="middle" fill="#8B97A6" font-size="10">catalog, docs</text>
+        <rect x="632" y="140" width="96" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="680" y="163" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Traces + evals</text><text x="680" y="181" text-anchor="middle" fill="#8B97A6" font-size="10">OTel</text>
+        <line x1="450" y1="212" x2="450" y2="232" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a1)"/>
+        <rect x="30" y="234" width="710" height="104" rx="14" fill="none" stroke="#3EE6C4"/>
+        <text x="46" y="254" fill="#3EE6C4" font-size="11" font-weight="600">COMMAND PATHS · GOLDEN PATH CONTRACTS</text>
+        <rect x="46" y="266" width="164" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="128" y="289" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Backstage templates</text><text x="128" y="307" text-anchor="middle" fill="#8B97A6" font-size="10">+ actions registry</text>
+        <rect x="220" y="266" width="164" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="302" y="289" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Crossplane XRs</text><text x="302" y="307" text-anchor="middle" fill="#8B97A6" font-size="10">schema = contract</text>
+        <rect x="394" y="266" width="164" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="476" y="289" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Kargo promotions</text><text x="476" y="307" text-anchor="middle" fill="#8B97A6" font-size="10">PR, approval, verify</text>
+        <rect x="568" y="266" width="158" height="56" rx="8" fill="#131A23" stroke="#2A3848"/><text x="647" y="289" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Runbook actions</text><text x="647" y="307" text-anchor="middle" fill="#8B97A6" font-size="10">reviewed catalogue</text>
+        <line x1="385" y1="338" x2="385" y2="376" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a1)"/>
+        <text x="395" y="362" fill="#7CA7FF" font-size="11">Git merge request is the only write path</text>
+        <text x="20" y="396" fill="#8B97A6" font-size="11" font-weight="600">IDP PLANES (existing)</text>
+        <rect x="20" y="406" width="136" height="66" rx="8" fill="#131A23" stroke="#2A3848"/><text x="88" y="430" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Developer</text><text x="88" y="446" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">control plane</text><text x="88" y="462" text-anchor="middle" fill="#8B97A6" font-size="10">Backstage, Git</text>
+        <rect x="164" y="406" width="136" height="66" rx="8" fill="#131A23" stroke="#2A3848"/><text x="232" y="430" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Integration</text><text x="232" y="446" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">+ delivery</text><text x="232" y="462" text-anchor="middle" fill="#8B97A6" font-size="10">GitLab CI, Argo CD</text>
+        <rect x="308" y="406" width="136" height="66" rx="8" fill="#131A23" stroke="#2A3848"/><text x="376" y="430" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Resource</text><text x="376" y="446" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">plane</text><text x="376" y="462" text-anchor="middle" fill="#8B97A6" font-size="10">EKS, AWS</text>
+        <rect x="452" y="406" width="136" height="66" rx="8" fill="#131A23" stroke="#2A3848"/><text x="520" y="430" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Monitoring</text><text x="520" y="446" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">+ logging</text><text x="520" y="462" text-anchor="middle" fill="#8B97A6" font-size="10">on by default</text>
+        <rect x="596" y="406" width="144" height="66" rx="8" fill="#131A23" stroke="#2A3848"/><text x="668" y="430" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">Security</text><text x="668" y="446" text-anchor="middle" fill="#E9EEF4" font-size="11.5" font-weight="600">plane</text><text x="668" y="462" text-anchor="middle" fill="#8B97A6" font-size="10">scan, KMS, policy</text>
+        <text x="380" y="502" text-anchor="middle" fill="#8B97A6" font-size="11">humans (dashed blue) skip the gateway; agents never skip the command paths</text>
+      </svg>
+      </div>
+      <figcaption>Fig 1. An agentic developer platform is an IDP with two thin layers on top: golden path contracts that both humans and agents call, and agent infrastructure that only agents pass through.</figcaption>
+    </figure>
+
+    <p>Three decisions in that picture do most of the work:</p>
+    <ul>
+      <li><strong>Agents never talk to the resource plane directly.</strong> No cloud credentials, no kubeconfig with write access. If an agent needs a database, it calls the database contract, which produces a merge request. This is the same principle I used in my <a href="/blog/ai-agents-terraform-guardrails/">post on Terraform guardrails</a>, applied to the whole platform.</li>
+      <li><strong>Git is the only write path.</strong> Argo CD and Crossplane reconcile what's merged. That gives you review, history, rollback and a single audit trail for free, whether the author was a person or an agent.</li>
+      <li><strong>The agent infrastructure layer is thin and boring.</strong> A gateway, identities, a policy engine, context and tracing. It doesn't contain business logic. The logic stays in the contracts, where the platform team already owns it.</li>
+    </ul>
+
+    <h2 id="tools">4. Exposing golden paths as tools</h2>
+    <p>For an agent to use a golden path, it has to find it and understand its inputs. That means turning paths into tools with names, descriptions and schemas. Backstage now does a lot of this for you. Plugins register actions in the <a href="https://backstage.io/docs/backend-system/core-services/actions-registry" rel="noopener">actions registry</a> with Zod input and output schemas plus attributes like <code>readOnly</code>, <code>idempotent</code> and <code>destructive</code>, and the <a href="https://backstage.io/docs/ai/mcp-actions" rel="noopener">MCP actions backend</a> serves them to MCP clients over Streamable HTTP.</p>
+    <p>The defaults matter here. Per the Backstage docs, an action with no attributes set is treated as not read-only and not idempotent, and <code>destructive</code> defaults to true unless the action is read-only. So an unlabelled action is assumed dangerous, which is exactly what you want. You can then split actions into separate MCP servers and filter out anything destructive:</p>
+<pre><code><span class="c"># app-config.yaml: expose catalog and scaffolder actions to agents, never destructive ones</span>
+<span class="k">backend</span>:
+  <span class="k">actions</span>:
+    <span class="k">pluginSources</span>:
+      - catalog
+      - scaffolder
+<span class="k">mcpActions</span>:
+  <span class="k">servers</span>:
+    <span class="k">catalog</span>:                         <span class="c"># served at /api/mcp-actions/v1/catalog</span>
+      <span class="k">filter</span>:
+        <span class="k">include</span>:
+          - <span class="k">id</span>: <span class="s">'catalog:*'</span>
+        <span class="k">exclude</span>:
+          - <span class="k">attributes</span>:
+              <span class="k">destructive</span>: true      <span class="c"># exclude rules win over include rules</span>
+    <span class="k">scaffolder</span>:                      <span class="c"># served at /api/mcp-actions/v1/scaffolder</span>
+      <span class="k">filter</span>:
+        <span class="k">include</span>:
+          - <span class="k">id</span>: <span class="s">'scaffolder:*'</span>
+        <span class="k">exclude</span>:
+          - <span class="k">attributes</span>:
+              <span class="k">destructive</span>: true</code></pre>
+    <p>Two practical notes. First, authentication: the Backstage docs describe static tokens for MCP clients as a temporary option and recommend OAuth with Client ID Metadata Documents; Dynamic Client Registration is now deprecated there. Give each agent its own identity rather than one shared token, or your audit log will say "mcp-clients" for everything. Second, keep the tool list short. An agent with forty overlapping tools picks the wrong one more often than an agent with eight clear ones. Name tools after outcomes ("create-postgres-database"), not mechanics ("run-template").</p>
+    <p>The template behind a tool is where the contract starts. This one adds a database claim to the team's GitOps folder through a merge request, and nothing else:</p>
+<pre><code><span class="k">apiVersion</span>: scaffolder.backstage.io/v1beta3
+<span class="k">kind</span>: Template
+<span class="k">metadata</span>:
+  <span class="k">name</span>: postgres-database
+  <span class="k">title</span>: PostgreSQL database for a service
+  <span class="k">description</span>: Adds a Database claim for one service via a merge request. Never applies directly.
+  <span class="k">tags</span>: [recommended, crossplane, agent-callable]
+<span class="k">spec</span>:
+  <span class="k">owner</span>: group:platform-team
+  <span class="k">type</span>: resource
+  <span class="k">parameters</span>:
+    - <span class="k">title</span>: Database
+      <span class="k">required</span>: [service, tier, sizeGiB]
+      <span class="k">properties</span>:
+        <span class="k">service</span>: { <span class="k">type</span>: string, <span class="k">pattern</span>: <span class="s">'^[a-z][a-z0-9-]{2,40}$'</span> }
+        <span class="k">tier</span>:    { <span class="k">type</span>: string, <span class="k">enum</span>: [standard, critical] }
+        <span class="k">sizeGiB</span>: { <span class="k">type</span>: integer, <span class="k">minimum</span>: 20, <span class="k">maximum</span>: 500 }
+  <span class="k">steps</span>:
+    - <span class="k">id</span>: render
+      <span class="k">name</span>: Render claim
+      <span class="k">action</span>: fetch:template
+      <span class="k">input</span>:
+        <span class="k">url</span>: ./claim
+        <span class="k">targetPath</span>: ./out
+        <span class="k">values</span>:
+          <span class="k">service</span>: <span class="s">${{ parameters.service }}</span>
+          <span class="k">tier</span>: <span class="s">${{ parameters.tier }}</span>
+          <span class="k">sizeGiB</span>: <span class="s">${{ parameters.sizeGiB }}</span>
+    - <span class="k">id</span>: mr
+      <span class="k">name</span>: Open merge request
+      <span class="k">action</span>: publish:gitlab:merge-request
+      <span class="k">input</span>:
+        <span class="k">repoUrl</span>: gitlab.example.internal?owner=platform&amp;repo=gitops
+        <span class="k">branchName</span>: <span class="s">db-${{ parameters.service }}</span>
+        <span class="k">title</span>: <span class="s">'Add database for ${{ parameters.service }}'</span>
+        <span class="k">description</span>: <span class="s">'Created from the postgres-database golden path.'</span>
+        <span class="k">sourcePath</span>: ./out
+        <span class="k">targetPath</span>: <span class="s">teams/${{ parameters.service }}/db</span>
+  <span class="k">output</span>:
+    <span class="k">links</span>:
+      - { <span class="k">title</span>: Merge request, <span class="k">url</span>: <span class="s">${{ steps.mr.output.mergeRequestUrl }}</span> }</code></pre>
+    <p>Notice what's missing: no free-text field for "extra settings", no raw Helm values, no instance class. Every field an agent can set is one the platform team has decided is safe to vary. That's the contract.</p>
+
+    <h2 id="schema">5. Put the rules in the schema</h2>
+    <p>Template parameters are only the front door. If someone, human or agent, writes the claim YAML by hand and skips Backstage, the template's validation doesn't run. So the real contract has to live in the API the cluster enforces. With Crossplane, that's the composite resource definition.</p>
+    <p>In <a href="https://docs.crossplane.io/latest/composition/composite-resource-definitions/" rel="noopener">Crossplane v2</a>, XRDs use <code>apiextensions.crossplane.io/v2</code> and composite resources can be namespaced, which fits multi-tenant clusters where each team owns a namespace. Because an XRD becomes a CRD, you also get Kubernetes <a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#validation-rules" rel="noopener">CEL validation rules</a> for cross-field checks:</p>
+<pre><code><span class="k">apiVersion</span>: apiextensions.crossplane.io/v2
+<span class="k">kind</span>: CompositeResourceDefinition
+<span class="k">metadata</span>:
+  <span class="k">name</span>: databases.platform.example.org
+<span class="k">spec</span>:
+  <span class="k">scope</span>: Namespaced                     <span class="c"># one namespace per team on multi-tenant EKS</span>
+  <span class="k">group</span>: platform.example.org
+  <span class="k">names</span>:
+    <span class="k">kind</span>: Database
+    <span class="k">plural</span>: databases
+  <span class="k">versions</span>:
+    - <span class="k">name</span>: v1alpha1
+      <span class="k">served</span>: true
+      <span class="k">referenceable</span>: true
+      <span class="k">schema</span>:
+        <span class="k">openAPIV3Schema</span>:
+          <span class="k">type</span>: object
+          <span class="k">properties</span>:
+            <span class="k">spec</span>:
+              <span class="k">type</span>: object
+              <span class="k">required</span>: [tier, sizeGiB]
+              <span class="k">properties</span>:
+                <span class="k">tier</span>:
+                  <span class="k">type</span>: string
+                  <span class="k">enum</span>: [standard, critical]
+                  <span class="k">description</span>: <span class="s">"critical = Multi-AZ, 14-day backups, deletion protection"</span>
+                <span class="k">sizeGiB</span>:
+                  <span class="k">type</span>: integer
+                  <span class="k">minimum</span>: 20
+                  <span class="k">maximum</span>: 500
+                <span class="k">engineVersion</span>:
+                  <span class="k">type</span>: string
+                  <span class="k">enum</span>: [<span class="s">"16"</span>, <span class="s">"17"</span>]
+                  <span class="k">default</span>: <span class="s">"17"</span>
+              <span class="k">x-kubernetes-validations</span>:
+                - <span class="k">rule</span>: <span class="s">"self.tier != 'critical' || self.sizeGiB &gt;= 50"</span>
+                  <span class="k">message</span>: <span class="s">"critical databases start at 50 GiB"</span>
+            <span class="k">status</span>:
+              <span class="k">type</span>: object
+              <span class="k">properties</span>:
+                <span class="k">endpoint</span>: { <span class="k">type</span>: string }</code></pre>
+    <p>The <code>description</code> fields aren't decoration. They're what an agent reads when it inspects the API, so write them for a reader who has never seen your wiki. The Composition behind this XRD decides what "critical" really means in AWS terms (Multi-AZ RDS, backup retention, deletion protection, a customer-managed KMS key), and none of those knobs are exposed. The agent chooses the tier; the platform chooses the implementation.</p>
+    <p class="callout">A good test for any golden path: could an agent that has read only the schema and its descriptions produce a valid request on the first try? If not, the knowledge is still in someone's head, and it'll leak out as review comments.</p>
+
+    <h2 id="loop">6. The validation loop: probabilistic step, deterministic gate</h2>
+    <p>Agents are probabilistic. They'll produce a slightly different claim each time and occasionally a wrong one. You don't fix that by asking the model to be more careful. You fix it by putting a deterministic gate after every probabilistic step, returning the gate's errors to the agent in a structured form, and letting it retry a bounded number of times before a human takes over.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 360" role="img" aria-label="Validation loop. An intent from a ticket or prompt goes to the agent, which drafts a change; this step is probabilistic. The draft goes through deterministic gates: schema and CEL rules, rendering with crossplane render or helm, kubeconform validation, conftest policy, and a diff with blast radius. If a gate fails, structured errors go back to the agent for up to three retries; after the third failure the change escalates to the owning team. If gates pass, a merge request is opened and approved according to the path's autonomy level, then Kargo promotes it and runs verification. Every run is traced and tagged as agent or human." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="20" y="40" width="130" height="60" rx="10" fill="#131A23" stroke="#2A3848"/><text x="85" y="66" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Intent</text><text x="85" y="84" text-anchor="middle" fill="#8B97A6" font-size="10.5">ticket or prompt</text>
+        <line x1="150" y1="70" x2="196" y2="70" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="198" y="40" width="160" height="60" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="278" y="64" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">Agent drafts change</text><text x="278" y="83" text-anchor="middle" fill="#8B97A6" font-size="10.5">probabilistic step</text>
+        <line x1="358" y1="70" x2="406" y2="70" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="408" y="22" width="332" height="138" rx="12" fill="#0E131A" stroke="#3EE6C4"/>
+        <text x="424" y="44" fill="#3EE6C4" font-size="12" font-weight="600">DETERMINISTIC GATES (same for humans)</text>
+        <g fill="#E9EEF4" font-size="11.5"><text x="424" y="66">1  schema + CEL rules (XRD, template)</text><text x="424" y="86">2  render (crossplane render, helm template)</text><text x="424" y="106">3  validate (kubeconform -strict)</text><text x="424" y="126">4  policy (conftest / OPA)</text><text x="424" y="146">5  diff + blast radius (Argo CD diff)</text></g>
+        <path d="M408,132 L300,132 L300,102" fill="none" stroke="#FF9E6D" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="398" y="150" text-anchor="end" fill="#FF9E6D" font-size="10.5">fail: errors as JSON</text>
+        <text x="398" y="164" text-anchor="end" fill="#FF9E6D" font-size="10.5">back to agent, ≤ 3 tries</text>
+        <line x1="230" y1="100" x2="230" y2="208" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+        <text x="150" y="160" fill="#8B97A6" font-size="10.5">3rd failure</text>
+        <rect x="140" y="210" width="180" height="56" rx="10" fill="#131A23" stroke="#2A3848"/><text x="230" y="234" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Escalate to owners</text><text x="230" y="252" text-anchor="middle" fill="#8B97A6" font-size="10.5">with the draft + gate output</text>
+        <line x1="490" y1="160" x2="490" y2="208" stroke="#3EE6C4" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="498" y="188" fill="#3EE6C4" font-size="11">pass</text>
+        <rect x="408" y="210" width="160" height="56" rx="10" fill="#131A23" stroke="#2A3848"/><text x="488" y="234" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Merge request</text><text x="488" y="252" text-anchor="middle" fill="#8B97A6" font-size="10.5">approval by autonomy level</text>
+        <line x1="568" y1="238" x2="584" y2="238" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="586" y="210" width="154" height="56" rx="10" fill="#131A23" stroke="#2A3848"/><text x="663" y="234" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Kargo promotion</text><text x="663" y="252" text-anchor="middle" fill="#8B97A6" font-size="10.5">+ verification</text>
+        <rect x="408" y="290" width="332" height="40" rx="10" fill="#0E131A" stroke="#7CA7FF"/><text x="574" y="315" text-anchor="middle" fill="#7CA7FF" font-size="11.5">every run traced, tagged agent or human, scored</text>
+        <line x1="663" y1="266" x2="663" y2="288" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+      </svg>
+      </div>
+      <figcaption>Fig 2. The validation loop. The agent can be wrong; the gates can't be skipped. The same gates run for human merge requests, so there's one definition of "valid".</figcaption>
+    </figure>
+
+    <p>The gates themselves are ordinary CI. The point is that they run on the rendered output, not just the input, and that they produce machine-readable results the agent can act on. Here's a GitLab CI job for a Crossplane claim:</p>
+<pre><code><span class="c"># .gitlab-ci.yml: the gate every golden path change goes through, agent or human</span>
+<span class="k">validate-claims</span>:
+  <span class="k">stage</span>: validate
+  <span class="k">image</span>: registry.example.internal/platform/gates:2026.10   <span class="c"># crossplane CLI, kubeconform, conftest</span>
+  <span class="k">services</span>: [docker:dind]                                     <span class="c"># crossplane render runs functions in containers</span>
+  <span class="k">rules</span>:
+    - <span class="k">if</span>: <span class="s">$CI_PIPELINE_SOURCE == "merge_request_event"</span>
+      <span class="k">changes</span>: [<span class="s">"teams/**/*.yaml"</span>]
+  <span class="k">script</span>:
+    - |
+      for claim in $(git diff --name-only "$CI_MERGE_REQUEST_DIFF_BASE_SHA" -- 'teams/**/*.yaml'); do
+        crossplane render "$claim" platform/compositions/database.yaml platform/functions.yaml \
+          --include-full-xr &gt;&gt; rendered.yaml
+        echo '---' &gt;&gt; rendered.yaml
+      done
+    - kubeconform -strict -summary -schema-location default
+        -schema-location <span class="s">'schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'</span> rendered.yaml
+    - conftest test rendered.yaml --policy policy/ --output json | tee conftest.json
+  <span class="k">artifacts</span>:
+    <span class="k">when</span>: always
+    <span class="k">paths</span>: [rendered.yaml, conftest.json]                       <span class="c"># the agent reads these on failure</span></code></pre>
+    <p>And a policy that encodes things the schema can't, written for OPA 1.x and run with <a href="https://www.conftest.dev/" rel="noopener">conftest</a>:</p>
+<pre><code><span class="k">package</span> main
+
+<span class="c"># every rendered resource carries an owner, so cost and incidents route to a team</span>
+<span class="k">deny</span> <span class="k">contains</span> msg <span class="k">if</span> {
+  input.metadata
+  <span class="k">not</span> input.metadata.labels[<span class="s">"platform.example.org/owner"</span>]
+  msg := sprintf(<span class="s">"%s/%s: missing platform.example.org/owner label"</span>, [input.kind, input.metadata.name])
+}
+
+<span class="c"># critical databases must keep 14 days of backups, whatever the composition did</span>
+<span class="k">deny</span> <span class="k">contains</span> msg <span class="k">if</span> {
+  input.kind == <span class="s">"Instance"</span>                     <span class="c"># RDS instance managed resource</span>
+  input.metadata.labels[<span class="s">"platform.example.org/tier"</span>] == <span class="s">"critical"</span>
+  input.spec.forProvider.backupRetentionPeriod &lt; 14
+  msg := sprintf(<span class="s">"%s: critical tier needs backupRetentionPeriod &gt;= 14"</span>, [input.metadata.name])
+}</code></pre>
+    <p>A few rules I'd hold the loop to:</p>
+    <ul>
+      <li><strong>Bound the retries.</strong> Three attempts is plenty. An agent that can't pass the gates in three tries is either missing context or the contract is unclear. Both are worth a human looking at, and both are useful feedback for the platform team.</li>
+      <li><strong>Make errors actionable.</strong> "Policy failed" is useless to an agent. "critical tier needs backupRetentionPeriod &gt;= 14" gets fixed on the next attempt. Good gate messages help humans just as much.</li>
+      <li><strong>Gates are not optional for anyone.</strong> If a human can bypass a gate with a label, an agent will eventually be told to add that label. Keep emergency overrides, but make them rare, logged and owned by people.</li>
+    </ul>
+
+    <h2 id="promote">7. Promotion: where agent changes meet production</h2>
+    <p>Passing the gates means a change is valid. It doesn't mean it's safe to ship to production. That decision belongs to the promotion layer, and Kargo is a good fit because promotions are declarative steps you can inspect. Its <a href="https://docs.kargo.io/user-guide/how-to-guides/working-with-stages" rel="noopener">Stages</a> pull Freight from the stage before, write the change into Git, can open a pull request and wait for it to merge, update Argo CD and then run verification.</p>
+<pre><code><span class="k">apiVersion</span>: kargo.akuity.io/v1alpha1
+<span class="k">kind</span>: Stage
+<span class="k">metadata</span>:
+  <span class="k">name</span>: prod
+  <span class="k">namespace</span>: payments
+<span class="k">spec</span>:
+  <span class="k">requestedFreight</span>:
+    - <span class="k">origin</span>: { <span class="k">kind</span>: Warehouse, <span class="k">name</span>: payments-api }
+      <span class="k">sources</span>: { <span class="k">stages</span>: [staging] }        <span class="c"># only Freight that survived staging</span>
+  <span class="k">promotionTemplate</span>:
+    <span class="k">spec</span>:
+      <span class="k">vars</span>:
+        - { <span class="k">name</span>: gitopsRepo, <span class="k">value</span>: https://gitlab.example.internal/platform/gitops.git }
+      <span class="k">steps</span>:
+        - <span class="k">uses</span>: git-clone
+          <span class="k">config</span>:
+            <span class="k">repoURL</span>: <span class="s">${{ vars.gitopsRepo }}</span>
+            <span class="k">checkout</span>: [{ <span class="k">branch</span>: main, <span class="k">path</span>: ./out }]
+        - <span class="k">uses</span>: yaml-update
+          <span class="k">config</span>:
+            <span class="k">path</span>: ./out/apps/payments-api/prod/values.yaml
+            <span class="k">updates</span>:
+              - <span class="k">key</span>: image.tag
+                <span class="k">value</span>: <span class="s">${{ imageFrom("registry.example.internal/payments-api").Tag }}</span>
+        - <span class="k">uses</span>: git-commit
+          <span class="k">config</span>: { <span class="k">path</span>: ./out, <span class="k">message</span>: <span class="s">"promote payments-api to prod"</span> }
+        - <span class="k">uses</span>: git-push
+          <span class="k">as</span>: push
+          <span class="k">config</span>: { <span class="k">path</span>: ./out, <span class="k">generateTargetBranch</span>: true }
+        - <span class="k">uses</span>: git-open-pr                        <span class="c"># a human approves the merge</span>
+          <span class="k">as</span>: open-pr
+          <span class="k">config</span>:
+            <span class="k">repoURL</span>: <span class="s">${{ vars.gitopsRepo }}</span>
+            <span class="k">sourceBranch</span>: <span class="s">${{ outputs.push.branch }}</span>
+            <span class="k">targetBranch</span>: main
+            <span class="k">title</span>: <span class="s">"Promote payments-api to prod"</span>
+            <span class="k">labels</span>: [promotion, needs-review]
+        - <span class="k">uses</span>: git-wait-for-pr
+          <span class="k">config</span>:
+            <span class="k">repoURL</span>: <span class="s">${{ vars.gitopsRepo }}</span>
+            <span class="k">prNumber</span>: <span class="s">${{ outputs['open-pr'].pr.id }}</span>
+        - <span class="k">uses</span>: argocd-update
+          <span class="k">config</span>:
+            <span class="k">apps</span>: [{ <span class="k">name</span>: payments-api-prod }]
+  <span class="k">verification</span>:
+    <span class="k">analysisTemplates</span>:
+      - <span class="k">name</span>: slo-burn-check                   <span class="c"># Argo Rollouts AnalysisTemplate</span></code></pre>
+    <p>Why this pattern works well with agents:</p>
+    <ul>
+      <li><strong>Freight only moves forward.</strong> An agent can't promote something to prod that never ran in staging, because the Stage only accepts Freight verified upstream.</li>
+      <li><strong>The approval lives in the promotion, not in the agent.</strong> The pull request is the gate. If you run Kargo on the Akuity Platform, v1.12 and later also have a <a href="https://docs.kargo.io/user-guide/reference-docs/promotion-steps" rel="noopener"><code>wait-for-approval</code></a> step with quorum rules, like two approvers with one from a named group.</li>
+      <li><strong>Argo CD stays in charge of the cluster.</strong> The <code>argocd-update</code> step only works on Applications annotated to allow that Stage, and Argo CD <a href="https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/" rel="noopener">sync windows</a> still block syncs during freezes. Agents inherit your change freeze automatically.</li>
+      <li><strong>Verification decides, not the agent's confidence.</strong> An AnalysisTemplate that checks SLO burn rate after promotion is a much better signal than any agent's opinion that "the change looks safe".</li>
+    </ul>
+
+    <h2 id="autonomy">8. Autonomy levels per path, not per agent</h2>
+    <p>Most autonomy discussions ask how much to trust an agent. I think that's the wrong unit. The same agent can be perfectly safe scaffolding a dev namespace and dangerous resizing a production database. Set autonomy per golden path, based on blast radius and reversibility, and let any agent use a path at that path's level.</p>
+    <p>The PlatformEngineering.org material describes four levels, moving from agents in the loop towards humans "on the loop" as orchestrators, with level 4 still a horizon. Here's how I'd map that onto concrete paths:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Golden path</th><th>Blast radius</th><th>Starting level</th><th>Promotion criteria</th><th>Ceiling</th></tr></thead>
+      <tbody>
+        <tr><td>Read catalog, docs, ownership, SLOs</td><td>None</td><td>Auto from day one</td><td>None needed</td><td>Auto</td></tr>
+        <tr><td>Scaffold a new service repo</td><td>One new repo</td><td>Run, human merges</td><td>30 runs, first-try gate pass above 90%, no reverts</td><td>Auto-merge within policy</td></tr>
+        <tr><td>Non-prod infrastructure claim</td><td>One team namespace, capped cost</td><td>Run, human merges</td><td>Same, plus budget cap held</td><td>Auto-merge within policy</td></tr>
+        <tr><td>Dependency and base image upgrades</td><td>Many services, reversible</td><td>Run, human merges</td><td>Change failure rate no worse than human upgrades</td><td>Auto to non-prod, PR to prod</td></tr>
+        <tr><td>Production data store claim or resize</td><td>Customer data</td><td>Draft only</td><td>Only after a quarter of clean drafts</td><td>Run, two approvers</td></tr>
+        <tr><td>Promotion to production</td><td>Customers</td><td>PR via Kargo</td><td>Verification pass rate, SLO burn after promotion</td><td>PR via Kargo</td></tr>
+        <tr><td>Delete anything stateful</td><td>Irreversible</td><td>Not exposed</td><td>n/a</td><td>Not exposed</td></tr>
+      </tbody>
+    </table></div>
+    <p>Store the level next to the path, in Git, and enforce it in the policy layer rather than in the agent's prompt. A prompt that says "always ask before merging" is a suggestion. A branch protection rule plus an OPA decision that says <code>needs_approval</code> is a control. I went into more detail on that split in the <a href="/blog/ai-sre-agents-incident-response/">AI SRE autonomy ladder post</a>.</p>
+
+    <h2 id="identity">9. Identity, tenancy and audit</h2>
+    <p>On a multi-tenant platform, the agent's identity is as important as the human's. The <a href="https://genai.owasp.org/" rel="noopener">OWASP Top 10 for Agentic Applications</a>, published in December 2025, lists identity and privilege abuse (ASI03), agentic supply chain issues (ASI04) and cascading failures (ASI08) among its top risks. All three show up quickly on a platform where agents can create resources.</p>
+    <ul>
+      <li><strong>One identity per agent per team.</strong> An agent working for the payments team gets a token scoped to the payments namespace and the payments folder in the GitOps repo. It can't open merge requests against another team's folder, and CODEOWNERS makes sure the right humans review what it does.</li>
+      <li><strong>Agents act on behalf of someone.</strong> Every merge request records both the agent identity and the human who started the session. When something goes wrong, "the agent did it" is not an acceptable answer for an incident review.</li>
+      <li><strong>Read access is scoped too.</strong> Context matters for quality, but an agent working on one service doesn't need every team's runbooks and incident notes. Backstage actions run with the caller's credentials, so the permission policies you already have for the catalog can scope what an agent sees. Use them.</li>
+      <li><strong>Trace every tool call.</strong> The Backstage MCP backend emits a span per <code>tools/call</code> and metrics for operation and session duration. Send them to the same observability stack your tenants already get by default, tagged with the agent identity.</li>
+      <li><strong>Treat MCP servers as dependencies.</strong> Pin versions, review tool descriptions when they change, and don't let agents add new tool servers on their own. A changed tool description can steer an agent as effectively as a prompt injection.</li>
+    </ul>
+
+    <h2 id="failure">10. How agentic platforms fail</h2>
+    <p>Most of these failure modes aren't new. They're the classic platform problems, sped up by an actor that never gets tired and never asks a colleague.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Failure mode</th><th>What it looks like</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>Golden path bypass</td><td>Agents write raw manifests because that's what they saw in training data</td><td>Admission policy that only accepts platform XRs in tenant namespaces; make the path the easy route</td></tr>
+        <tr><td>Schema drift</td><td>The template, XRD and docs disagree; agents fail gates in loops</td><td>Generate template parameters and docs from the XRD; one source of truth</td></tr>
+        <tr><td>Tool sprawl</td><td>Dozens of overlapping tools; agents pick the wrong one</td><td>Separate MCP servers per domain, outcome-based names, an allowlist per agent</td></tr>
+        <tr><td>Rubber-stamp approvals</td><td>Reviewers approve 40 agent MRs a day without reading them</td><td>Approval only for high blast radius paths; show a rendered diff and policy result, not raw YAML</td></tr>
+        <tr><td>Cascading changes</td><td>One agent's upgrade triggers other agents to "fix" downstream breakage</td><td>Rate limits per path, change budgets per team per day, a kill switch that freezes all agent identities</td></tr>
+        <tr><td>Context poisoning</td><td>Outdated or malicious text in docs or catalog descriptions steers the agent</td><td>Owned, reviewed docs; treat catalog text as data; gates catch the result anyway</td></tr>
+        <tr><td>Cost runaway</td><td>Agents create dev environments and never clean them up</td><td>TTL labels on non-prod claims, quotas per namespace, cost reported per agent identity</td></tr>
+        <tr><td>Platform team as bottleneck</td><td>Every failed run escalates to the platform team</td><td>Escalate to the owning team, not the platform team; fix unclear contracts, not individual runs</td></tr>
+      </tbody>
+    </table></div>
+    <p>One pattern from the Google SRE book's chapter on <a href="https://sre.google/sre-book/eliminating-toil/" rel="noopener">eliminating toil</a> applies directly: automation should make the system more predictable, not just faster. If agents make your platform faster but your change failure rate goes up, you've automated toil into incidents. That's exactly the throughput-up, stability-down pattern DORA found.</p>
+
+    <h2 id="measure">11. Measuring it</h2>
+    <p>You can't tell whether any of this works without splitting your delivery metrics by who made the change. Tag every merge request and promotion with the actor type (human, agent, or agent on behalf of a human) and the golden path it used. Then track:</p>
+    <ul>
+      <li><strong>DORA metrics by actor.</strong> Lead time, deployment frequency, change failure rate and recovery time, split by human and agent. Agent changes should not have a worse change failure rate than human ones on the same path.</li>
+      <li><strong>First-try gate pass rate per path.</strong> This is the best single measure of contract quality. Low numbers mean the schema or docs are unclear, whoever is calling.</li>
+      <li><strong>Retries and escalations per run.</strong> Rising retries after a platform release usually means you broke the contract without versioning it.</li>
+      <li><strong>Golden path coverage.</strong> The share of infrastructure changes that went through a contract rather than raw YAML. This should rise as agent usage rises, not fall.</li>
+      <li><strong>Review time on agent MRs.</strong> If it drops towards zero on high blast radius paths, you have rubber-stamping, not trust.</li>
+    </ul>
+
+    <h2 id="plan">12. A 60-day plan and checklist</h2>
+    <p>You don't need to rebuild your platform. Pick two or three paths and make them contracts.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>When</th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td>Week 1–2</td><td>Inventory what agents already do in your repos. Pick the two most common changes (often a new service and a non-prod database). Write their contracts: schema, guarantees, owner.</td></tr>
+        <tr><td>Week 3–4</td><td>Tighten the XRDs with enums, ranges, CEL rules and descriptions. Add the render, kubeconform and conftest gate in CI with JSON output. Run it on human MRs first.</td></tr>
+        <tr><td>Week 5–6</td><td>Expose read-only catalog actions and the two templates over Backstage MCP actions, with a separate identity per agent. Turn on tracing for tool calls.</td></tr>
+        <tr><td>Week 7–8</td><td>Let agents run the two paths at "run, human merges". Measure first-try pass rate, retries and escalations. Fix the contract wherever the agent fails, rather than adding to the prompt.</td></tr>
+        <tr><td>Day 60</td><td>Review the numbers against the promotion criteria. Move one path up a level if it qualifies. Add the next path.</td></tr>
+      </tbody>
+    </table></div>
+    <p>And the checklist I'd want ticked before any agent touches a golden path:</p>
+    <ol>
+      <li>Agents have no cloud credentials and no write kubeconfig. Git is the only write path.</li>
+      <li>Each path has a versioned schema with types, enums, ranges and cross-field rules, enforced by the cluster, not just the form.</li>
+      <li>Every field has a description a newcomer could act on.</li>
+      <li>The same deterministic gates run for human and agent changes, on rendered output, with machine-readable errors.</li>
+      <li>Retries are bounded, and failures escalate to the owning team with the draft and the gate output.</li>
+      <li>Autonomy is set per path, stored in Git and enforced by policy and branch protection, not by the prompt.</li>
+      <li>Production promotions go through Kargo with a pull request or approval step and post-promotion verification.</li>
+      <li>Each agent has its own identity, scoped to one team, and every action records the human it acted for.</li>
+      <li>Tool calls are traced into your normal observability stack and tagged by agent.</li>
+      <li>MCP servers and tool definitions are pinned and reviewed like any other dependency.</li>
+      <li>Sync windows and change freezes apply to agents automatically.</li>
+      <li>There's a single switch that pauses every agent identity at once, and it's been tested.</li>
+    </ol>
+
+    <h2>The short version</h2>
+    <p>Agents are about to become the busiest users of most internal platforms. That's good news if your golden paths are real contracts, because the platform becomes the place where you get consistency at a volume no review process can match. It's bad news if your paths are wizards with knowledge hidden in people's heads, because agents will route around them. So write the contracts down, put the rules in the schema, gate every probabilistic step with a deterministic one, keep Git as the only write path, and give each path the autonomy its blast radius deserves. Most of that is just good platform engineering, done strictly.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/ai-agents-terraform-guardrails/">Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates</a><span>Agents can write your Terraform, but they should not approve it. Plan-only roles, policy on the plan and real approval gates.</span></li>
+      <li><a href="/blog/ai-sre-agents-incident-response/">AI SRE agents on call: an autonomy ladder for incident response</a><span>What an AI agent should be allowed to do during an incident, level by level, with OPA-gated actions and a 90-day rollout plan.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
