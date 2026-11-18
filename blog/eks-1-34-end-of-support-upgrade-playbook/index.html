@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EKS 1.34 end of standard support: a zero-downtime upgrade playbook | Arjun Kanojia</title>
+<meta name="description" content="Amazon EKS 1.34 leaves standard support on 2 December 2026. What extended support really costs, how the upgrade policy works, in-place versus blue/green, the 1.35 to 1.37 changes that break things, Karpenter node rotation with disruption budgets, failure modes and a two-week plan.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="EKS 1.34 end of standard support: a zero-downtime upgrade playbook">
+<meta property="og:description" content="EKS 1.34 standard support ends on 2 December 2026. The real cost of extended support, the upgrade policy switch, what changed in 1.35 to 1.37, Karpenter node rotation, failure modes and a two-week plan.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/">
+<meta property="og:image" content="https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="EKS 1.34 end of standard support: a zero-downtime upgrade playbook. Blog post by Arjun Kanojia.">
+<meta property="article:published_time" content="2026-11-16">
+<meta property="article:modified_time" content="2026-11-16">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/og.png">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<style>.prose .svgscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.prose .svgscroll svg{min-width:640px}</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "EKS 1.34 end of standard support: a zero-downtime upgrade playbook",
+  "description": "Amazon EKS 1.34 leaves standard support on 2 December 2026. The cost of extended support, the cluster upgrade policy, in-place versus blue/green upgrades, the Kubernetes 1.35 to 1.37 changes that break workloads, Karpenter node rotation with disruption budgets, failure modes and a two-week plan.",
+  "image": "https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/og.png",
+  "datePublished": "2026-11-16",
+  "dateModified": "2026-11-16",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/eks-1-34-end-of-support-upgrade-playbook/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "Amazon EKS, EKS upgrade, Kubernetes 1.34, Kubernetes 1.35, Kubernetes 1.36, Kubernetes 1.37, EKS extended support, upgrade policy, Karpenter, PodDisruptionBudget, blue green cluster upgrade, cgroup v2, platform engineering, SRE"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">Kubernetes · November 2026</span>
+    <h1>EKS 1.34 end of standard support: a zero-downtime upgrade playbook</h1>
+    <p class="dek">On 2 December 2026, every EKS cluster still on Kubernetes 1.34 moves into extended support and starts costing six times as much for its control plane. That's the easy part to fix. The harder part is getting from 1.34 to 1.36 or 1.37 without an outage, when there are three versions' worth of changes between you and a supported release. This is the playbook I'd follow.</p>
+    <div class="meta"><time datetime="2026-11-16">16 November 2026</time> · 15 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#dates">The dates that matter this month</a></li>
+        <li><a href="#cost">What extended support actually costs</a></li>
+        <li><a href="#policy">The upgrade policy is a decision, not a default</a></li>
+        <li><a href="#path">In-place or blue/green?</a></li>
+        <li><a href="#changes">What changed between 1.34 and 1.37</a></li>
+        <li><a href="#preflight">Pre-flight checks</a></li>
+        <li><a href="#sequence">The upgrade sequence, one hop at a time</a></li>
+        <li><a href="#nodes">Rotating nodes without dropping traffic</a></li>
+        <li><a href="#failures">Failure modes and what rollback really means</a></li>
+        <li><a href="#plan">A two-week plan and checklist</a></li>
+      </ol>
+    </nav>
+
+    <p>Kubernetes ships three minor releases a year, and Amazon EKS supports each one for 14 months of standard support plus 12 months of paid extended support. That cadence means a platform team is never more than a few months away from its next forced decision. This month, two of those decisions land at once: EKS 1.31 reaches the end of extended support on 26 November, and 1.34 leaves standard support on 2 December.</p>
+    <p>I upgraded EKS from 1.33 to 1.36 at work this year, over about two months. The biggest lesson wasn't any single breaking change. It was that upgrades go smoothly when they're a repeatable process with checks at each step, and painfully when they're a yearly event someone has to rediscover. This post is that process, written for anyone with a 1.34 cluster and two weeks.</p>
+
+    <h2 id="dates">1. The dates that matter this month</h2>
+    <p>Here's the current state of the <a href="https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html" rel="noopener">EKS Kubernetes version calendar</a>, as of today:</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 364" role="img" aria-label="Timeline of Amazon EKS Kubernetes version support from late 2024 to the end of 2028. Each version from 1.31 to 1.37 has a teal bar for 14 months of standard support followed by an apricot bar for 12 months of paid extended support. A vertical line marks today, 16 November 2026. At that line, 1.31 is about to reach the end of extended support on 26 November 2026, 1.32 and 1.33 are already in extended support, 1.34 has about two weeks of standard support left until 2 December 2026, and 1.35, 1.36 and 1.37 are in standard support until March 2027, August 2027 and December 2027." font-family="Geist, system-ui, sans-serif">
+      <line x1="121.6" y1="42" x2="121.6" y2="294" stroke="#1F2A36"/>
+      <text x="121.6" y="36" text-anchor="middle" fill="#8B97A6" font-size="11">2025</text>
+      <line x1="276.1" y1="42" x2="276.1" y2="294" stroke="#1F2A36"/>
+      <text x="276.1" y="36" text-anchor="middle" fill="#8B97A6" font-size="11">2026</text>
+      <line x1="430.6" y1="42" x2="430.6" y2="294" stroke="#1F2A36"/>
+      <text x="430.6" y="36" text-anchor="middle" fill="#8B97A6" font-size="11">2027</text>
+      <line x1="585.1" y1="42" x2="585.1" y2="294" stroke="#1F2A36"/>
+      <text x="585.1" y="36" text-anchor="middle" fill="#8B97A6" font-size="11">2028</text>
+      <text x="58" y="73" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.31</text>
+      <rect x="80.6" y="61" width="180.3" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="260.9" y="61" width="154.5" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="107" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.32</text>
+      <rect x="130.9" y="95" width="179.5" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="310.4" y="95" width="154.5" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="141" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.33</text>
+      <rect x="184.3" y="129" width="180.3" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="364.6" y="129" width="154.5" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="175" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.34</text>
+      <rect x="237.6" y="163" width="180.3" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="417.9" y="163" width="154.5" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="209" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.35</text>
+      <rect x="287.1" y="197" width="179.5" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="466.6" y="197" width="154.9" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="243" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.36</text>
+      <rect x="340.5" y="231" width="180.3" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="520.8" y="231" width="154.9" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <text x="58" y="277" text-anchor="end" fill="#E9EEF4" font-size="12.5" font-weight="600">1.37</text>
+      <rect x="391.7" y="265" width="180.3" height="18" rx="4" fill="#3EE6C4" fill-opacity="0.85"/>
+      <rect x="572.0" y="265" width="154.9" height="18" rx="4" fill="#FF9E6D" fill-opacity="0.75"/>
+      <line x1="411.1" y1="48" x2="411.1" y2="298" stroke="#E9EEF4" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="411.1" y="26" text-anchor="middle" fill="#E9EEF4" font-size="11" font-weight="600">today · 16 Nov 2026</text>
+      <text x="231.6" y="176" text-anchor="end" fill="#FF9E6D" font-size="10.5">standard ends 2 Dec 2026</text>
+      <text x="423.4" y="74" fill="#FF9E6D" font-size="10.5">1.31: forced upgrade after 26 Nov 2026</text>
+      <rect x="70" y="314" width="14" height="10" rx="2" fill="#3EE6C4"/><text x="90" y="324" fill="#8B97A6" font-size="11">standard support · $0.10 per cluster-hour</text>
+      <rect x="340" y="314" width="14" height="10" rx="2" fill="#FF9E6D"/><text x="360" y="324" fill="#8B97A6" font-size="11">extended support · $0.60 per cluster-hour</text>
+      <text x="70" y="346" fill="#5D6977" font-size="10.5">Dates from the Amazon EKS Kubernetes version calendar. After extended support ends, EKS upgrades the control plane for you.</text>
+      </svg>
+      </div>
+      <figcaption>Fig 1. EKS version lifecycle. Every version gets 14 months of standard support (teal) and 12 months of extended support (apricot). The dashed line is today.</figcaption>
+    </figure>
+
+    <div class="tbl"><table>
+      <thead><tr><th>Version</th><th>End of standard support</th><th>End of extended support</th><th>What happens next</th></tr></thead>
+      <tbody>
+        <tr><td>1.31</td><td>26 Nov 2025</td><td><strong>26 Nov 2026</strong></td><td>EKS upgrades the control plane to 1.32 for you, at a time it doesn't announce. Nodes and add-ons stay where they are.</td></tr>
+        <tr><td>1.32</td><td>23 Mar 2026</td><td>23 Mar 2027</td><td>Already in extended support and already paying for it.</td></tr>
+        <tr><td>1.33</td><td>29 Jul 2026</td><td>29 Jul 2027</td><td>Same as 1.32.</td></tr>
+        <tr><td>1.34</td><td><strong>2 Dec 2026</strong></td><td>2 Dec 2027</td><td>Moves to extended support and the higher price, unless the upgrade policy says otherwise.</td></tr>
+        <tr><td>1.35</td><td>27 Mar 2027</td><td>27 Mar 2028</td><td>A short-lived target. You'd be doing this again in four months.</td></tr>
+        <tr><td>1.36</td><td>2 Aug 2027</td><td>2 Aug 2028</td><td>A sensible target if you want proven add-on versions.</td></tr>
+        <tr><td>1.37</td><td>1 Dec 2027</td><td>1 Dec 2028</td><td>The newest. A full year of standard support from here.</td></tr>
+      </tbody>
+    </table></div>
+    <p>One detail in the AWS docs deserves attention: when EKS performs a forced upgrade at the end of a support window, it only upgrades the control plane. Self-managed nodes and managed node groups stay on the old version, and add-ons aren't touched. You end up with exactly the version skew you'd normally plan carefully, created at a time you didn't pick.</p>
+
+    <h2 id="cost">2. What extended support actually costs</h2>
+    <p>The <a href="https://aws.amazon.com/eks/pricing/" rel="noopener">EKS pricing page</a> lists $0.10 per cluster-hour in standard support and $0.60 in extended support. Fifty cents an hour sounds like nothing, which is why it gets ignored. It adds up across a fleet:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Clusters on extended support</th><th>Extra cost per month</th><th>Extra cost per year</th><th>Rough comparison</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>$365</td><td>$4,380</td><td>A small production node group</td></tr>
+        <tr><td>5 (dev, staging, prod in a few regions)</td><td>$1,825</td><td>$21,900</td><td>A good engineer's time for a few weeks</td></tr>
+        <tr><td>20 (multi-tenant or per-customer clusters)</td><td>$7,300</td><td>$87,600</td><td>A real line item a finance team will ask about</td></tr>
+      </tbody>
+    </table></div>
+    <p>These numbers use 730 hours a month and only count the extra $0.50. The control-plane fee is the visible part. The cost that doesn't show up on the bill is risk: on extended support you still get security patches for the control plane, but the community and the add-on ecosystem move on. Helm charts, operators and controllers drop old versions from their test matrices first. The <a href="https://www.finops.org/framework/" rel="noopener">FinOps Foundation framework</a> would file this under avoidable spend, and that's the right frame: extended support is a bridge you pay for on purpose, not a place to live.</p>
+    <p class="callout">Extended support is the right call when the upgrade can't be done safely before the deadline. It's the wrong call when it's chosen by default because nobody looked at the date. The policy switch in the next section makes that choice explicit.</p>
+
+    <h2 id="policy">3. The upgrade policy is a decision, not a default</h2>
+    <p>Every EKS cluster has an <a href="https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html" rel="noopener">upgrade policy</a> with a <code>supportType</code> of <code>EXTENDED</code> or <code>STANDARD</code>. It defaults to <code>EXTENDED</code>. With <code>STANDARD</code>, the cluster never enters extended support. Instead, EKS upgrades the control plane automatically when standard support ends. So the real choice is between paying more and having the control plane upgraded underneath you. Neither is a plan, which is why the policy should be set deliberately, per environment, in code:</p>
+<pre><code><span class="c"># Terraform, AWS provider 5.x / 6.x</span>
+<span class="k">resource</span> <span class="s">"aws_eks_cluster"</span> <span class="s">"this"</span> {
+  <span class="k">name</span>     = var.cluster_name
+  <span class="k">version</span>  = var.kubernetes_version          <span class="c"># bumped one minor at a time, through a merge request</span>
+  <span class="k">role_arn</span> = aws_iam_role.cluster.arn
+
+  <span class="k">upgrade_policy</span> {
+    <span class="c"># dev and staging: STANDARD, so a forgotten cluster gets upgraded, not billed</span>
+    <span class="c"># production: EXTENDED, so a hard deadline never forces an unplanned control-plane upgrade</span>
+    <span class="k">support_type</span> = var.environment == <span class="s">"prod"</span> ? <span class="s">"EXTENDED"</span> : <span class="s">"STANDARD"</span>
+  }
+
+  <span class="k">vpc_config</span> {
+    <span class="k">subnet_ids</span> = var.private_subnet_ids
+  }
+}</code></pre>
+    <p>That split reflects a trade-off I'd make on most platforms. In non-production, an automatic upgrade is a cheap early warning: if something breaks there, you'd rather find out on a Tuesday than in production. In production, I'd keep <code>EXTENDED</code> as insurance and treat any month spent in it as an incident-style signal that the upgrade process is too slow. To see where a fleet stands today:</p>
+<pre><code><span class="c"># Version and support policy for every cluster in a region</span>
+<span class="k">for</span> c <span class="k">in</span> $(aws eks list-clusters --query <span class="s">'clusters[]'</span> --output text); <span class="k">do</span>
+  aws eks describe-cluster --name <span class="s">"$c"</span> \
+    --query <span class="s">'cluster.[name, version, upgradePolicy.supportType]'</span> --output text
+<span class="k">done</span>
+
+<span class="c"># Opt a non-production cluster out of extended support</span>
+aws eks update-cluster-config --name dev-apps --upgrade-policy supportType=STANDARD</code></pre>
+
+    <h2 id="path">4. In-place or blue/green?</h2>
+    <p>There are two industry-standard ways to upgrade a cluster, and the <a href="https://docs.aws.amazon.com/eks/latest/best-practices/cluster-upgrades.html" rel="noopener">EKS Best Practices Guide</a> covers both. <strong>In-place</strong> upgrades the existing cluster one minor version at a time: control plane, then add-ons, then nodes. <strong>Blue/green</strong> builds a new cluster on the target version, moves workloads and traffic across, and deletes the old one. EKS only lets you move the control plane up one minor version per upgrade, so going from 1.34 to 1.37 in place means three full hops. Blue/green can jump straight there.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 400" role="img" aria-label="Decision tree for choosing an EKS upgrade strategy. First question: can workloads move to a new cluster cleanly, meaning they are deployed by GitOps, keep their state outside the cluster, and their traffic can be shifted at the edge or DNS? If no, use in-place upgrades, one minor version per hop, and keep extended support as the safety net if the deadline is too close. If yes, second question: are you three or more versions behind, or changing something foundational such as the CNI, the AMI family or the cluster networking? If yes, use blue/green: build a new cluster on the target version and shift traffic by weight. If no, either works; in-place is usually cheaper, and blue/green gives the cleanest rollback." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="170" y="12" width="420" height="60" rx="10" fill="#0E131A" stroke="#3EE6C4"/>
+        <text x="380" y="37" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">Can workloads move to a new cluster cleanly?</text>
+        <text x="380" y="57" text-anchor="middle" fill="#8B97A6" font-size="11">GitOps-deployed · state outside the cluster · traffic shiftable at edge or DNS</text>
+        <line x1="250" y1="72" x2="160" y2="126" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text x="178" y="100" fill="#8B97A6" font-size="11">no</text>
+        <line x1="510" y1="72" x2="560" y2="126" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text x="548" y="100" fill="#8B97A6" font-size="11">yes</text>
+        <rect x="20" y="128" width="280" height="110" rx="10" fill="#131A23" stroke="#7CA7FF"/>
+        <text x="160" y="153" text-anchor="middle" fill="#7CA7FF" font-size="13" font-weight="600">In-place, one hop at a time</text>
+        <text x="160" y="176" text-anchor="middle" fill="#8B97A6" font-size="11">control plane → add-ons → nodes</text>
+        <text x="160" y="194" text-anchor="middle" fill="#8B97A6" font-size="11">repeat per minor version</text>
+        <text x="160" y="212" text-anchor="middle" fill="#8B97A6" font-size="11">extended support as the safety net</text>
+        <text x="160" y="229" text-anchor="middle" fill="#8B97A6" font-size="11">if the deadline is too close</text>
+        <rect x="400" y="128" width="340" height="66" rx="10" fill="#0E131A" stroke="#3EE6C4"/>
+        <text x="570" y="153" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">3+ versions behind, or changing</text>
+        <text x="570" y="173" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">CNI, AMI family or networking?</text>
+        <line x1="490" y1="194" x2="440" y2="262" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text x="448" y="232" fill="#8B97A6" font-size="11">yes</text>
+        <line x1="650" y1="194" x2="660" y2="262" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text x="664" y="232" fill="#8B97A6" font-size="11">no</text>
+        <rect x="330" y="264" width="220" height="110" rx="10" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="440" y="289" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">Blue/green cluster</text>
+        <text x="440" y="312" text-anchor="middle" fill="#8B97A6" font-size="11">new cluster on target version</text>
+        <text x="440" y="330" text-anchor="middle" fill="#8B97A6" font-size="11">same GitOps repo, new destination</text>
+        <text x="440" y="348" text-anchor="middle" fill="#8B97A6" font-size="11">shift traffic by weight</text>
+        <text x="440" y="366" text-anchor="middle" fill="#8B97A6" font-size="11">old cluster is the rollback</text>
+        <rect x="570" y="264" width="170" height="110" rx="10" fill="#131A23" stroke="#FF9E6D"/>
+        <text x="655" y="289" text-anchor="middle" fill="#FF9E6D" font-size="13" font-weight="600">Either works</text>
+        <text x="655" y="312" text-anchor="middle" fill="#8B97A6" font-size="11">in-place is cheaper</text>
+        <text x="655" y="330" text-anchor="middle" fill="#8B97A6" font-size="11">blue/green has the</text>
+        <text x="655" y="348" text-anchor="middle" fill="#8B97A6" font-size="11">cleanest rollback</text>
+        <text x="20" y="392" fill="#5D6977" font-size="10.5">EKS control planes move one minor version per upgrade and can't be downgraded.</text>
+      </svg>
+      </div>
+      <figcaption>Fig 2. Picking a strategy. Portability decides first; distance and the size of the change decide the rest.</figcaption>
+    </figure>
+
+    <div class="tbl"><table>
+      <thead><tr><th></th><th>In-place</th><th>Blue/green cluster</th></tr></thead>
+      <tbody>
+        <tr><td>Hops from 1.34 to 1.37</td><td>Three control-plane upgrades, with add-ons and nodes after each</td><td>One build, one migration</td></tr>
+        <tr><td>Rollback</td><td>Control plane can't be downgraded; you roll forward or roll back workloads and nodes</td><td>Shift traffic back to the old cluster</td></tr>
+        <tr><td>Extra cost</td><td>None beyond surge nodes</td><td>Two clusters' worth of nodes during the overlap</td></tr>
+        <tr><td>What it needs</td><td>Good PDBs, add-on discipline, patience</td><td>Everything in Git, external state, a traffic-shifting layer, IAM and DNS that aren't tied to one cluster</td></tr>
+        <tr><td>Hidden work</td><td>Repeated checks per hop</td><td>Pod Identity associations, IRSA trust policies, security groups, allowlisted egress IPs, webhooks and certificates for the new cluster</td></tr>
+        <tr><td>Best for</td><td>One or two versions behind, stateful or tightly integrated clusters</td><td>Far behind, or bundling a big platform change into the move</td></tr>
+      </tbody>
+    </table></div>
+    <p>My default is in-place for clusters that are close to current, and blue/green when a cluster has drifted a long way or needs a foundational change anyway. The deciding question is how portable your workloads really are. If deploying a fresh cluster from Git is something you do monthly, blue/green is low risk. If it's something you've never tried, the upgrade is the wrong time to find out.</p>
+
+    <h2 id="changes">5. What changed between 1.34 and 1.37</h2>
+    <p>Each minor release has its own <a href="https://kubernetes.io/releases/" rel="noopener">release notes</a> and "urgent upgrade notes", and you should read all three sets for 1.35, 1.36 and 1.37. These are the changes I'd check first, because they fail at the node or workload level rather than showing up as an API warning:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Change</th><th>Version</th><th>What breaks</th><th>How to check</th></tr></thead>
+      <tbody>
+        <tr><td>Nodes on cgroup v1 no longer initialise by default</td><td>1.35</td><td>Custom AMIs or old OS images still on cgroup v1 fail to join the cluster</td><td><code>stat -fc %T /sys/fs/cgroup/</code> should print <code>cgroup2fs</code>. AL2023 and Bottlerocket use cgroup v2</td></tr>
+        <tr><td>kube-proxy IPVS mode deprecated</td><td>1.35</td><td>Nothing yet, but removal is scheduled. Plan the move to iptables or nftables mode as its own change</td><td>Check <code>mode</code> in the <code>kube-proxy-config</code> ConfigMap in <code>kube-system</code></td></tr>
+        <tr><td><code>gitRepo</code> volume permanently disabled</td><td>1.36</td><td>Pods are accepted by the API server but the kubelet won't run them</td><td>The jq query below; replace with an init container or git-sync</td></tr>
+        <tr><td>Service <code>externalIPs</code> deprecated</td><td>1.36</td><td>Warnings now; disabled by default in a later release, removal planned for 1.43</td><td>The jq query below; move to LoadBalancer Services or Gateway API</td></tr>
+        <tr><td>Stricter IP and CIDR validation</td><td>1.36</td><td>Values with leading zeros or host bits set are rejected on the next create or update, often during a GitOps sync</td><td>Grep manifests and Helm values for CIDRs and IPs before the hop</td></tr>
+        <tr><td>No Amazon Linux 2 EKS AMIs</td><td>1.33 onwards</td><td>Managed node groups or launch templates still pinned to AL2 can't move up</td><td>Check AMI type on node groups; Karpenter EC2NodeClass <code>amiSelectorTerms</code></td></tr>
+        <tr><td>Ingress NGINX retired (March 2026)</td><td>Not a Kubernetes change</td><td>No fixes or new releases, so its support matrix stops at older Kubernetes versions</td><td>Inventory IngressClasses; plan a Gateway API or AWS Load Balancer Controller migration</td></tr>
+      </tbody>
+    </table></div>
+    <p>For the two workload-level items, these queries find offenders in a running cluster:</p>
+<pre><code><span class="c"># Pods that use the gitRepo volume type (won't run on 1.36+ kubelets)</span>
+kubectl get pods -A -o json | jq -r <span class="s">'.items[]
+  | select(any(.spec.volumes[]?; has("gitRepo")))
+  | "\(.metadata.namespace)/\(.metadata.name)"'</span>
+
+<span class="c"># Services that still set externalIPs (deprecated in 1.36)</span>
+kubectl get svc -A -o json | jq -r <span class="s">'.items[]
+  | select(.spec.externalIPs != null)
+  | "\(.metadata.namespace)/\(.metadata.name) \(.spec.externalIPs | join(","))"'</span>
+
+<span class="c"># kube-proxy mode on EKS ("" or "iptables" is fine, "ipvs" needs a plan)</span>
+kubectl -n kube-system get configmap kube-proxy-config -o yaml | grep -E <span class="s">'^\s*mode:'</span></code></pre>
+
+    <h2 id="preflight">6. Pre-flight checks</h2>
+    <p>The best-known public example of an upgrade going wrong is Reddit's <a href="https://www.reddit.com/r/RedditEng/comments/11xx5o0/you_broke_reddit_the_piday_outage/" rel="noopener">Pi Day outage</a> in March 2023. An in-place upgrade from 1.23 to 1.24 removed an old node label that their Calico route reflector configuration still selected on, and pod networking fell apart across the cluster. Nothing in Kubernetes was buggy. A dependency around it relied on something that changed. That's the pattern the pre-flight is designed to catch: an add-on that doesn't support the new version, a webhook that times out, a label or API something still depends on. Find those before the control plane moves, because it can't move back.</p>
+    <h3>EKS upgrade insights</h3>
+    <p><a href="https://docs.aws.amazon.com/eks/latest/userguide/cluster-insights.html" rel="noopener">EKS cluster insights</a> scan the cluster's audit logs for calls to deprecated APIs and check things like kubelet version skew and add-on compatibility for the next version. They're free and already running. Make reading them a required step:</p>
+<pre><code><span class="c"># Anything that isn't PASSING blocks the hop</span>
+aws eks list-insights --cluster-name prod-apps \
+  --filter <span class="s">'{"categories":["UPGRADE_READINESS"],"statuses":["ERROR","WARNING","UNKNOWN"]}'</span> \
+  --query <span class="s">'insights[].[name, insightStatus.status, kubernetesVersion]'</span> --output table
+
+<span class="c"># Details, including which clients called a deprecated API and when</span>
+aws eks describe-insight --cluster-name prod-apps --id &lt;insight-id&gt;
+
+<span class="c"># Add-on versions that support the next minor version</span>
+<span class="k">for</span> a <span class="k">in</span> vpc-cni coredns kube-proxy aws-ebs-csi-driver eks-pod-identity-agent; <span class="k">do</span>
+  aws eks describe-addon-versions --addon-name <span class="s">"$a"</span> --kubernetes-version 1.35 \
+    --query <span class="s">'addons[0].addonVersions[0].addonVersion'</span> --output text | sed <span class="s">"s/^/$a: /"</span>
+<span class="k">done</span></code></pre>
+    <p>Insights only see API calls that actually happened during their lookback window. A CronJob that runs monthly, or a Helm chart that's only applied on release day, won't show up. So I'd also scan the source of truth: run a tool like <a href="https://github.com/FairwindsOps/pluto" rel="noopener">Pluto</a> against the rendered manifests in the GitOps repo, not just the live cluster.</p>
+    <h3>The things outside Kubernetes</h3>
+    <ul>
+      <li><strong>Controllers and operators.</strong> Karpenter, the AWS Load Balancer Controller, cert-manager, External Secrets, Argo CD, KEDA, service meshes and database operators all publish support matrices. Upgrade them to a version that supports both the current and the target Kubernetes version before the hop.</li>
+      <li><strong>Admission webhooks.</strong> List every <code>ValidatingWebhookConfiguration</code> and <code>MutatingWebhookConfiguration</code>. A webhook with <code>failurePolicy: Fail</code> whose backend is unhealthy can block every pod creation during node rotation.</li>
+      <li><strong>IaC and CI.</strong> Pin the new version in Terraform first, and make sure the pipeline's <code>kubectl</code> and Helm versions are within the supported skew.</li>
+      <li><strong>The stateful tier.</strong> Databases and brokers running on EC2 aren't upgraded by EKS, but their clients and any operators in the cluster are. Check client library and operator compatibility, not just the server.</li>
+    </ul>
+
+    <h2 id="sequence">7. The upgrade sequence, one hop at a time</h2>
+    <p>The <a href="https://sre.google/sre-book/release-engineering/" rel="noopener">Google SRE book's chapter on release engineering</a> argues for releases that are repeatable and boring. A cluster upgrade fits that perfectly once it's broken into the same five steps every time, with a gate between each:</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 300" role="img" aria-label="The in-place upgrade loop for one minor version. Step 0, pre-flight: upgrade insights, deprecated API scan, add-on and controller compatibility, and an etcd-independent backup of manifests in Git. A gate checks that all insights are passing. Step 1, control plane: aws eks update-cluster-version to the next minor; cannot be undone. Step 2, add-ons: VPC CNI, CoreDNS, kube-proxy, EBS CSI and Pod Identity agent to versions for the new minor, plus controllers if needed. Step 3, data plane: Karpenter drift or managed node group rolling update, respecting PodDisruptionBudgets and disruption budgets. Step 4, verify and soak: SLO dashboards, smoke tests and error budget burn for a day before the next hop. An arrow loops back from step 4 to step 0 labelled next minor, repeating 1.34 to 1.35, 1.35 to 1.36, 1.36 to 1.37. A warning notes that the gate before step 1 matters most because the control plane cannot be downgraded." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="16" y="40" width="132" height="150" rx="10" fill="#131A23" stroke="#2A3848"/>
+        <text x="82" y="64" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">0 Pre-flight</text>
+        <text x="82" y="88" text-anchor="middle" fill="#8B97A6" font-size="10.5">upgrade insights</text>
+        <text x="82" y="106" text-anchor="middle" fill="#8B97A6" font-size="10.5">deprecated APIs</text>
+        <text x="82" y="124" text-anchor="middle" fill="#8B97A6" font-size="10.5">add-on matrix</text>
+        <text x="82" y="142" text-anchor="middle" fill="#8B97A6" font-size="10.5">controllers, webhooks</text>
+        <text x="82" y="160" text-anchor="middle" fill="#8B97A6" font-size="10.5">Terraform pinned</text>
+        <line x1="148" y1="115" x2="170" y2="115" stroke="#FF9E6D" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="172" y="40" width="132" height="150" rx="10" fill="#0E131A" stroke="#FF9E6D"/>
+        <text x="238" y="64" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">1 Control plane</text>
+        <text x="238" y="88" text-anchor="middle" fill="#8B97A6" font-size="10.5">update-cluster-version</text>
+        <text x="238" y="106" text-anchor="middle" fill="#8B97A6" font-size="10.5">next minor only</text>
+        <text x="238" y="124" text-anchor="middle" fill="#8B97A6" font-size="10.5">API stays available</text>
+        <text x="238" y="160" text-anchor="middle" fill="#FF9E6D" font-size="10.5">no downgrade</text>
+        <line x1="304" y1="115" x2="326" y2="115" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="328" y="40" width="132" height="150" rx="10" fill="#131A23" stroke="#2A3848"/>
+        <text x="394" y="64" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">2 Add-ons</text>
+        <text x="394" y="88" text-anchor="middle" fill="#8B97A6" font-size="10.5">VPC CNI</text>
+        <text x="394" y="106" text-anchor="middle" fill="#8B97A6" font-size="10.5">CoreDNS, kube-proxy</text>
+        <text x="394" y="124" text-anchor="middle" fill="#8B97A6" font-size="10.5">EBS CSI, Pod Identity</text>
+        <text x="394" y="142" text-anchor="middle" fill="#8B97A6" font-size="10.5">controllers if needed</text>
+        <line x1="460" y1="115" x2="482" y2="115" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="484" y="40" width="132" height="150" rx="10" fill="#131A23" stroke="#7CA7FF"/>
+        <text x="550" y="64" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">3 Data plane</text>
+        <text x="550" y="88" text-anchor="middle" fill="#8B97A6" font-size="10.5">Karpenter drift</text>
+        <text x="550" y="106" text-anchor="middle" fill="#8B97A6" font-size="10.5">or MNG rolling update</text>
+        <text x="550" y="124" text-anchor="middle" fill="#8B97A6" font-size="10.5">PDBs respected</text>
+        <text x="550" y="142" text-anchor="middle" fill="#8B97A6" font-size="10.5">disruption budgets</text>
+        <line x1="616" y1="115" x2="638" y2="115" stroke="#5D6977" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="640" y="40" width="104" height="150" rx="10" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="692" y="64" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">4 Verify</text>
+        <text x="692" y="88" text-anchor="middle" fill="#8B97A6" font-size="10.5">SLO dashboards</text>
+        <text x="692" y="106" text-anchor="middle" fill="#8B97A6" font-size="10.5">smoke tests</text>
+        <text x="692" y="124" text-anchor="middle" fill="#8B97A6" font-size="10.5">error budget</text>
+        <text x="692" y="142" text-anchor="middle" fill="#8B97A6" font-size="10.5">soak a day</text>
+        <path d="M692,190 L692,236 L82,236 L82,196" fill="none" stroke="#3EE6C4" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a2)"/>
+        <text x="387" y="256" text-anchor="middle" fill="#3EE6C4" font-size="11.5">next minor: 1.34 → 1.35 → 1.36 → 1.37</text>
+        <text x="160" y="28" text-anchor="middle" fill="#FF9E6D" font-size="10.5">gate: all insights passing</text>
+        <text x="380" y="288" text-anchor="middle" fill="#5D6977" font-size="10.5">The gate before step 1 matters most: everything after it can be retried, the control plane can't be undone.</text>
+      </svg>
+      </div>
+      <figcaption>Fig 3. One hop of an in-place upgrade. The same five steps repeat for each minor version, with a soak period before the next.</figcaption>
+    </figure>
+
+    <p>A few rules make the loop safe:</p>
+    <ul>
+      <li><strong>Lowest environment first, every hop.</strong> Dev goes 1.34 → 1.35, then staging, then production, before anyone starts 1.35 → 1.36. Running hops in parallel across environments removes the point of having environments.</li>
+      <li><strong>Add-ons right after the control plane.</strong> AWS publishes a default add-on version for each Kubernetes version. Leaving CoreDNS or the VPC CNI several versions behind is how skew bugs sneak in.</li>
+      <li><strong>Don't stack node rotations.</strong> With kubelets allowed to be up to three minor versions behind the API server, it's tempting to upgrade the control plane three times and rotate nodes once. It works, but it puts three versions of change into one node rollout and makes any failure much harder to pin down. I'd rotate nodes on every hop.</li>
+      <li><strong>Soak for at least a day.</strong> Some failures, like a controller that only reconciles on a timer or a CronJob that runs at night, take a while to appear.</li>
+    </ul>
+
+    <h2 id="nodes">8. Rotating nodes without dropping traffic</h2>
+    <p>The control-plane step is the scary one, but the node rotation is where users actually feel an upgrade. Every pod gets evicted and rescheduled, so this step is only as safe as your <a href="https://kubernetes.io/docs/concepts/workloads/pods/disruptions/" rel="noopener">PodDisruptionBudgets</a>, readiness probes and graceful shutdown handling.</p>
+    <p>With Karpenter, the clean way to do it is drift. If the <code>EC2NodeClass</code> selects the EKS-optimised AMI by alias, Karpenter resolves the AMI for the cluster's current Kubernetes version. After the control plane moves, the resolved AMI changes, existing nodes are marked as drifted, and Karpenter replaces them. Disruption budgets control the pace:</p>
+<pre><code><span class="k">apiVersion</span>: karpenter.k8s.aws/v1
+<span class="k">kind</span>: EC2NodeClass
+<span class="k">metadata</span>:
+  <span class="k">name</span>: general
+<span class="k">spec</span>:
+  <span class="k">role</span>: KarpenterNodeRole-prod-apps
+  <span class="k">amiSelectorTerms</span>:
+    - <span class="k">alias</span>: al2023@v20261101        <span class="c"># example version: pin in prod, bump through Git so drift happens when you choose</span>
+  <span class="k">subnetSelectorTerms</span>:
+    - <span class="k">tags</span>: { <span class="k">karpenter.sh/discovery</span>: prod-apps }
+  <span class="k">securityGroupSelectorTerms</span>:
+    - <span class="k">tags</span>: { <span class="k">karpenter.sh/discovery</span>: prod-apps }
+  <span class="k">metadataOptions</span>:
+    <span class="k">httpTokens</span>: required
+    <span class="k">httpPutResponseHopLimit</span>: 1
+---
+<span class="k">apiVersion</span>: karpenter.sh/v1
+<span class="k">kind</span>: NodePool
+<span class="k">metadata</span>:
+  <span class="k">name</span>: general
+<span class="k">spec</span>:
+  <span class="k">template</span>:
+    <span class="k">spec</span>:
+      <span class="k">nodeClassRef</span>: { <span class="k">group</span>: karpenter.k8s.aws, <span class="k">kind</span>: EC2NodeClass, <span class="k">name</span>: general }
+      <span class="k">expireAfter</span>: 720h
+  <span class="k">disruption</span>:
+    <span class="k">consolidationPolicy</span>: WhenEmptyOrUnderutilized
+    <span class="k">budgets</span>:
+      - <span class="k">nodes</span>: <span class="s">"10%"</span>                 <span class="c"># at most 10% of nodes disrupted at once, for any reason</span>
+      - <span class="k">nodes</span>: <span class="s">"0"</span>                   <span class="c"># no drift replacements 03:00-17:00 UTC (daytime in India and Europe)</span>
+        <span class="k">reasons</span>: [Drifted]
+        <span class="k">schedule</span>: <span class="s">"0 3 * * *"</span>
+        <span class="k">duration</span>: 14h</code></pre>
+    <p>Pinning the alias in production is a deliberate choice. With <code>al2023@latest</code>, nodes drift whenever AWS publishes a new AMI, which is convenient in dev and surprising in production. Pinned, the AMI bump is a merge request you schedule right after the control-plane hop.</p>
+    <p>On the workload side, every Deployment that serves traffic needs a PDB that allows some disruption, plus enough replicas spread across zones for the PDB to mean something:</p>
+<pre><code><span class="k">apiVersion</span>: policy/v1
+<span class="k">kind</span>: PodDisruptionBudget
+<span class="k">metadata</span>:
+  <span class="k">name</span>: checkout-api
+<span class="k">spec</span>:
+  <span class="k">maxUnavailable</span>: 1                   <span class="c"># not minAvailable: 100%, which blocks every drain</span>
+  <span class="k">unhealthyPodEvictionPolicy</span>: AlwaysAllow   <span class="c"># don't let crash-looping pods block node rotation</span>
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>: { <span class="k">app</span>: checkout-api }</code></pre>
+    <p>Two PDB mistakes cause most stuck rotations: a budget that allows zero disruptions (often a single-replica Deployment with <code>minAvailable: 1</code>), and a budget whose selector matches nothing. Find both before the hop, with a quick look at <code>kubectl get pdb -A</code> for any row where <code>ALLOWED DISRUPTIONS</code> is 0. Also make sure pods shut down cleanly: a <code>preStop</code> sleep a little longer than your load balancer's deregistration delay avoids the burst of 502s that often shows up during rotations behind an ALB.</p>
+
+    <h2 id="failures">9. Failure modes and what rollback really means</h2>
+    <p>An EKS control plane can't be downgraded. That changes what "rollback" means: you can roll back workloads, add-ons and node AMIs, but past the control-plane step the only way out is forward. This is why the pre-flight gate matters so much, and why blue/green is attractive for big jumps. These are the failures worth rehearsing:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Symptom</th><th>Likely cause</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>New nodes never become Ready</td><td>cgroup v1 image on 1.35+, AMI not matching the version, or a CNI add-on too old</td><td>Stop the rollout (Karpenter budget to 0 or pause the node group update); fix the AMI or add-on; old nodes keep serving</td></tr>
+        <tr><td>Node drain stuck for hours</td><td>PDB with zero allowed disruptions; pods without controllers</td><td>Fix the PDB; scale the workload up; use <code>terminationGracePeriod</code> on the NodePool as a ceiling</td></tr>
+        <tr><td>Pods fail to create after the hop</td><td>Admission webhook down or incompatible; a removed API in a chart</td><td>Fix or temporarily scope the webhook; roll back the chart to a working version</td></tr>
+        <tr><td>Intermittent DNS failures</td><td>CoreDNS version skew or too few replicas during rotation</td><td>Upgrade the CoreDNS add-on; set a PDB and anti-affinity on CoreDNS</td></tr>
+        <tr><td>GitOps sync suddenly failing</td><td>Stricter validation in 1.36 rejecting an old IP or CIDR value</td><td>Fix the value in Git; validation ratcheting keeps existing objects running</td></tr>
+        <tr><td>5xx burst during rotation</td><td>No graceful shutdown; load balancer still sending to terminating pods</td><td><code>preStop</code> delay, readiness gates, and drift during low traffic only</td></tr>
+      </tbody>
+    </table></div>
+    <p>The <a href="https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html" rel="noopener">AWS Well-Architected Reliability Pillar</a> recommends automating changes and testing them in a production-like environment first. For upgrades, that means the staging cluster has to be a real rehearsal: same add-ons, same controllers, same webhooks and the same PDBs as production. A staging cluster that's missing half of production's add-ons can pass a hop that production then fails.</p>
+
+    <h2 id="plan">10. A two-week plan and checklist</h2>
+    <p>If you have 1.34 clusters today, two weeks is enough for one careful hop to 1.35 in production, which is enough to stay in standard support until March. That buys time to do 1.36 and 1.37 properly instead of in a rush. Here's how I'd lay it out:</p>
+    <ol>
+      <li><strong>Day 1: inventory and decide.</strong> List every cluster with its version and <code>supportType</code>. Set non-production to <code>STANDARD</code>. Decide in-place or blue/green per cluster, and write down the target version.</li>
+      <li><strong>Days 2–3: pre-flight.</strong> Read the 1.35 urgent upgrade notes. Clear every non-passing upgrade insight. Run the gitRepo, externalIPs, kube-proxy and cgroup checks. Upgrade controllers to versions that support both 1.34 and 1.35.</li>
+      <li><strong>Days 4–5: dev.</strong> Run the full loop in dev, including node rotation. Note anything that needed a manual step and automate it.</li>
+      <li><strong>Days 6–8: staging.</strong> Same loop, with a load test running during node rotation so you see what users would see. Soak for a day.</li>
+      <li><strong>Days 9–11: production.</strong> Upgrade during low traffic, with the on-call engineer aware. Rotate nodes under disruption budgets. Watch SLOs and error budget burn.</li>
+      <li><strong>Days 12–14: buffer, then start 1.36.</strong> Keep two days for surprises. Then start the next hop's pre-flight, so the next deadline is never a deadline.</li>
+    </ol>
+    <p>And the checklist I'd run before every hop:</p>
+    <ol>
+      <li>The target version and the upgrade policy are set in Terraform, through a merge request.</li>
+      <li>EKS upgrade insights show nothing in ERROR, WARNING or UNKNOWN.</li>
+      <li>Rendered manifests from Git have been scanned for removed APIs, not just the live cluster.</li>
+      <li>Every controller, operator and webhook has a version that supports the target Kubernetes version.</li>
+      <li>Node images are on cgroup v2, and none of them are AL2.</li>
+      <li>No pods use <code>gitRepo</code> volumes; <code>externalIPs</code> users have a migration plan.</li>
+      <li>Every serving workload has at least two replicas and a PDB that allows one disruption.</li>
+      <li>Karpenter disruption budgets and a schedule window are set; managed node groups have a sensible max-unavailable.</li>
+      <li>Pods shut down gracefully behind the load balancer.</li>
+      <li>Staging has the same add-ons, controllers and webhooks as production and has already done this hop.</li>
+      <li>SLO dashboards and a rollback plan for workloads and nodes are ready. Everyone knows the control plane only goes forward.</li>
+      <li>The next hop's date is in the calendar before this one is closed.</li>
+    </ol>
+
+    <h2>The short version</h2>
+    <p>EKS 1.34 leaves standard support on 2 December 2026. Staying put costs $0.50 more per cluster-hour, and switching the policy to <code>STANDARD</code> just means EKS upgrades the control plane for you. Neither is a plan. The plan is a repeatable loop: pre-flight, control plane, add-ons, nodes, verify, one minor version at a time, lowest environment first, with disruption budgets doing the hard work during node rotation. Make it boring enough that you do it three times a year, and these deadlines stop being events.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/peak-traffic-lessons-fifa-world-cup-2026/">Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills</a><span>Load testing, pre-scaling with KEDA and Karpenter, DR by RTO and RPO, and an event-day runbook.</span></li>
+      <li><a href="/blog/llm-inference-eks-kubernetes-1-37/">Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing</a><span>What 1.37 changes for GPU workloads: DRA with Karpenter, inference routing and scale-to-zero.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
