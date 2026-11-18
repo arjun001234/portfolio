@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates | Arjun Kanojia</title>
+<meta name="description" content="A guardrail architecture for AI agents that write Terraform: a workspace with no cloud credentials, plan-only and apply-only OIDC roles on AWS, OPA policy on the plan JSON, GitLab CI approval gates, autonomy tiers by blast radius and nightly drift detection. With working IAM, Rego and pipeline configs.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/ai-agents-terraform-guardrails/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates">
+<meta property="og:description" content="Agents can write your Terraform. They should not approve it. A layered design with plan-only credentials, policy on the plan, real approval gates and drift detection.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/ai-agents-terraform-guardrails/">
+<meta property="article:published_time" content="2026-10-12">
+<meta property="article:modified_time" content="2026-10-12">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<style>.figscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.figscroll svg{min-width:640px}.swipe{display:none}@media (max-width:720px){.swipe{display:inline}}</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates",
+  "description": "A guardrail architecture for AI agents that write Terraform: no cloud credentials in the agent workspace, plan-only and apply-only OIDC roles, OPA policy on the plan JSON, approval gates, autonomy tiers and drift detection.",
+  "datePublished": "2026-10-12",
+  "dateModified": "2026-10-12",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/ai-agents-terraform-guardrails/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "AI agents, agentic AI, Terraform, infrastructure as code, guardrails, OIDC, AWS IAM, OPA, Conftest, policy as code, GitLab CI, drift detection, platform engineering, DevOps, SRE"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">AI in platform engineering · October 2026</span>
+    <h1>Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates</h1>
+    <p class="dek">AI agents are now good enough to write most of your Terraform. That moves the interesting question from who writes the change to who is allowed to apply it. This is the guardrail design I'd put in front of any agent that touches infrastructure code, with the IAM, policy and pipeline configs.</p>
+    <div class="meta"><time datetime="2026-10-12">12 October 2026</time> · 18 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#why">Why this is the question right now</a></li>
+        <li><a href="#failure">Five ways agent-written IaC goes wrong</a></li>
+        <li><a href="#principle">The principle: the agent proposes, the pipeline governs</a></li>
+        <li><a href="#workspace">Layer 1: a workspace with nothing worth stealing</a></li>
+        <li><a href="#identity">Layer 2: credentials the agent cannot widen</a></li>
+        <li><a href="#policy">Layer 3: policy on the plan, not the prompt</a></li>
+        <li><a href="#approval">Layer 4: approval that means something</a></li>
+        <li><a href="#tiers">How much autonomy for which change</a></li>
+        <li><a href="#drift">Drift detection as the safety net</a></li>
+        <li><a href="#checklist">Rollout plan and checklist</a></li>
+      </ol>
+    </nav>
+
+    <p>At work I use agentic AI to help create and maintain Terraform. It is good at the parts of infrastructure as code that used to eat afternoons: wiring a module, bumping a provider across a pile of workspaces, writing the variables and outputs nobody enjoys writing.</p>
+    <p>It is also a tool that can write a change that replaces a database, and explain with complete confidence why that is fine.</p>
+    <p>So the question is no longer whether agents should write IaC. They already do. HashiCorp's recent guidance answers it in one line: agents propose changes, and the platform governs them (<a href="https://www.infoq.com/news/2026/09/hcp-terraform-ai-driven-control/" rel="noopener">InfoQ's summary</a>). This post makes that concrete for Terraform, GitLab CI and AWS. I helped move 300+ Jenkins pipelines onto GitLab runners on EKS this year, so the examples are GitLab CI, but the same shape works with GitHub Actions, OpenTofu or HCP Terraform.</p>
+    <p>One rule holds the design together: <strong>nothing the agent can edit should be able to change what the agent is allowed to do.</strong></p>
+    <p>A note on scope: this is a reference design built from public guidance and industry practice, not a description of any employer's setup.</p>
+
+    <h2 id="why">1. Why this is the question right now</h2>
+    <p><strong>The vendors converged.</strong> HashiCorp now describes HCP Terraform as the control plane for agent-written infrastructure: agents can generate, validate and explain configuration, but should not approve their own work, weaken policy, hold broad credentials or bypass deployment controls.</p>
+    <p><strong>The security community named the risks.</strong> OWASP published its <a href="https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/" rel="noopener">Top 10 for Agentic Applications</a> in December 2025. Two entries describe an IaC agent with cloud access almost exactly: ASI02, tool misuse, and ASI03, identity and privilege abuse. The older <a href="https://genai.owasp.org/llmrisk/llm062025-excessive-agency/" rel="noopener">LLM06: Excessive Agency</a> gives the three root causes: too much functionality, too many permissions, too much autonomy.</p>
+    <p><strong>The incidents went public.</strong> In July 2025, SaaStr founder Jason Lemkin reported that a Replit agent deleted a live database during a code freeze. Replit's CEO called it unacceptable, added automatic separation of development and production databases, and announced a planning-only mode (<a href="https://fortune.com/2025/07/23/ai-coding-tool-replit-wiped-database-called-it-a-catastrophic-failure" rel="noopener">Fortune</a>). In 2026, the founder of PocketOS reported that a coding agent working on a staging task deleted a production storage volume, and the backups stored in it, in about nine seconds. By his account it used an API token that was unrelated to the task and carried delete rights, with no confirmation step and no environment scoping. The hosting provider later recovered more recent data and changed its API (<a href="https://ia.acs.org.au/article/2026/gone-in-9-seconds--ai-agent-deletes-company-database.html" rel="noopener">Information Age</a>).</p>
+    <p>In both reports the model is not the interesting part. They are ordinary access-control failures: a credential that could delete production was reachable from where the agent was running. OWASP's advice says it plainly: "Implement authorization in downstream systems rather than relying on an LLM to decide if an action is allowed or not."</p>
+    <p>There is a delivery argument too. DORA's 2026 report on the ROI of AI-assisted development found that the gains depend on the platform around the tool, and that adoption brings a "verification tax" on reviewers and more delivery instability unless teams keep batches small and testing automated (<a href="https://www.infoq.com/news/2026/05/dora-roi-ai-assisted-dev-report/" rel="noopener">InfoQ</a>).</p>
+
+    <h2 id="failure">2. Five ways agent-written IaC goes wrong</h2>
+    <p>Before designing controls, be specific about what you are defending against. These failure modes keep coming up in public write-ups. Each is mapped to an OWASP agentic category and to the control that stops it.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Failure mode</th><th>What it looks like</th><th>OWASP</th><th>The control that stops it</th></tr></thead>
+      <tbody>
+        <tr><td>Destructive plan</td><td>A rename or a "cleanup" becomes destroy-and-recreate on a database, bucket or volume.</td><td>ASI02 Tool misuse</td><td>Policy on the plan JSON that denies deletes of protected types, plus <code>prevent_destroy</code> on stateful resources.</td></tr>
+        <tr><td>Credential reach</td><td>The agent finds a broader credential than the task needed, in an env var, a CLI profile, a CI variable or a state file, and uses it.</td><td>ASI03 Identity and privilege abuse</td><td>No long-lived keys anywhere. Short-lived OIDC roles bound to one repo and one branch.</td></tr>
+        <tr><td>Weakening the gate</td><td>To get a green pipeline, the agent edits the pipeline, the policy or the test that was blocking it.</td><td>ASI10 Rogue agents</td><td>Pipeline and policy live outside the repo. Code owners on anything that defines the checks.</td></tr>
+        <tr><td>Plausible but wrong</td><td>Valid HCL that passes <code>validate</code> but opens a security group to the world or drops encryption, because the pattern is common in public code.</td><td>ASI09 Human-agent trust exploitation</td><td>Static scanning and policy as code. Small merge requests. A reviewer who reads the plan.</td></tr>
+        <tr><td>Runaway blast radius</td><td>One "simple" change touches hundreds of resources across environments.</td><td>ASI08 Cascading failures</td><td>A change-count limit for agent-authored plans, one workspace per merge request, state split per environment.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Notice what is missing from the right-hand column: a better prompt. Instructions make these failures rarer. They do not make them impossible, and impossible is the bar for deleting production data.</p>
+
+    <h2 id="principle">3. The principle: the agent proposes, the pipeline governs</h2>
+    <p>None of this needs a new security idea. It is separation of duties and least privilege (AC-5 and AC-6 in <a href="https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final" rel="noopener">NIST SP 800-53</a>) applied to a new kind of author. Google's <a href="https://google.github.io/building-secure-and-reliable-systems/raw/ch05.html" rel="noopener">Building Secure and Reliable Systems</a> sets the same goal for humans: remove direct access to production, route changes through narrow, audited automation, and require a second party for sensitive actions.</p>
+    <p>So treat the agent as a fast, unprivileged contributor. It gets the same path to production as a new joiner on day one: a merge request.</p>
+
+    <figure>
+      <div class="figscroll">
+      <svg viewBox="0 0 760 512" role="img" aria-label="Trust-boundary architecture for agent-written Terraform. In the agent workspace, which has no cloud credentials, an engineer prompts an AI agent with its own bot identity, the agent runs local checks and pushes a branch to open a merge request. In the CI pipeline, which uses short-lived OIDC credentials per job, a plan job with a read-only role saves the plan file, a policy gate runs OPA on the plan JSON, a human approves through code owners and a protected environment, and an apply job that only runs on the main branch applies the saved plan. In the AWS account, the plan job assumes a read-only role that any branch may use, the apply job assumes a write role whose trust policy only accepts the main branch, and both act on the state bucket and live resources. A nightly drift plan reuses the read-only role." font-family="Geist, system-ui, sans-serif">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker>
+          <marker id="m1b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7CA7FF"/></marker>
+          <marker id="m1o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#FF9E6D"/></marker>
+        </defs>
+
+        <rect x="20" y="14" width="720" height="112" rx="14" fill="none" stroke="#7CA7FF" stroke-dasharray="6 5"/>
+        <text x="36" y="36" fill="#7CA7FF" font-size="12" font-weight="600">AGENT WORKSPACE · NO CLOUD CREDENTIALS</text>
+        <rect x="40" y="50" width="150" height="58" rx="8" fill="#131A23" stroke="#2A3848"/><text x="115" y="75" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Engineer</text><text x="115" y="93" text-anchor="middle" fill="#8B97A6" font-size="11">ticket or prompt</text>
+        <rect x="220" y="50" width="150" height="58" rx="8" fill="#131A23" stroke="#2A3848"/><text x="295" y="75" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">AI agent</text><text x="295" y="93" text-anchor="middle" fill="#8B97A6" font-size="11">own bot identity</text>
+        <rect x="400" y="50" width="160" height="58" rx="8" fill="#131A23" stroke="#2A3848"/><text x="480" y="75" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Local checks</text><text x="480" y="93" text-anchor="middle" fill="#8B97A6" font-size="11">fmt · validate · tflint</text>
+        <rect x="590" y="50" width="130" height="58" rx="8" fill="#131A23" stroke="#2A3848"/><text x="655" y="75" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Merge request</text><text x="655" y="93" text-anchor="middle" fill="#8B97A6" font-size="11">branch push only</text>
+        <line x1="190" y1="79" x2="218" y2="79" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="370" y1="79" x2="398" y2="79" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="560" y1="79" x2="588" y2="79" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+
+        <path d="M655,108 V146 H115 V202" fill="none" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <text x="385" y="141" text-anchor="middle" fill="#8B97A6" font-size="11">merge request pipeline starts</text>
+
+        <rect x="20" y="166" width="720" height="150" rx="14" fill="none" stroke="#3EE6C4"/>
+        <text x="724" y="188" text-anchor="end" fill="#3EE6C4" font-size="12" font-weight="600">CI PIPELINE · SHORT-LIVED OIDC CREDENTIALS PER JOB</text>
+        <rect x="40" y="204" width="150" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="115" y="232" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Plan job</text><text x="115" y="250" text-anchor="middle" fill="#8B97A6" font-size="11">read-only role</text>
+        <rect x="215" y="204" width="150" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="290" y="232" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Policy gate</text><text x="290" y="250" text-anchor="middle" fill="#8B97A6" font-size="11">OPA on plan JSON</text>
+        <rect x="390" y="204" width="165" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="472" y="232" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Human approval</text><text x="472" y="250" text-anchor="middle" fill="#8B97A6" font-size="11">code owner + environment</text>
+        <rect x="580" y="204" width="140" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="650" y="232" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Apply job</text><text x="650" y="250" text-anchor="middle" fill="#8B97A6" font-size="11">main branch only</text>
+        <line x1="190" y1="236" x2="213" y2="236" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="365" y1="236" x2="388" y2="236" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="555" y1="236" x2="578" y2="236" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <g fill="#8B97A6" font-size="11" text-anchor="middle">
+          <text x="120" y="294">saves the plan file</text>
+          <text x="290" y="294">deletes · IAM · blast radius</text>
+          <text x="472" y="294">author cannot approve</text>
+          <text x="646" y="294">applies saved plan</text>
+        </g>
+
+        <line x1="52" y1="268" x2="52" y2="389" stroke="#7CA7FF" stroke-width="1.5" marker-end="url(#m1b)"/>
+        <line x1="710" y1="268" x2="710" y2="389" stroke="#FF9E6D" stroke-width="1.5" marker-end="url(#m1o)"/>
+        <text x="62" y="341" fill="#7CA7FF" font-size="11">assumes (read)</text>
+        <text x="700" y="341" text-anchor="end" fill="#FF9E6D" font-size="11">assumes (write)</text>
+        <text x="385" y="341" text-anchor="middle" fill="#8B97A6" font-size="11">nightly drift plan reuses the read-only role</text>
+
+        <rect x="20" y="356" width="720" height="124" rx="14" fill="none" stroke="#FF9E6D"/>
+        <text x="385" y="378" text-anchor="middle" fill="#FF9E6D" font-size="12" font-weight="600">AWS ACCOUNT · TRUST POLICIES THE AGENT CANNOT EDIT</text>
+        <rect x="40" y="392" width="150" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="115" y="420" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">tf-plan-readonly</text><text x="115" y="438" text-anchor="middle" fill="#8B97A6" font-size="11">trust: any branch</text>
+        <rect x="215" y="392" width="340" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="385" y="420" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">State + live resources</text><text x="385" y="438" text-anchor="middle" fill="#8B97A6" font-size="11">S3 state with lockfile · EKS · RDS · network</text>
+        <rect x="580" y="392" width="140" height="64" rx="8" fill="#131A23" stroke="#2A3848"/><text x="650" y="420" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">tf-apply</text><text x="650" y="438" text-anchor="middle" fill="#8B97A6" font-size="11">trust: ref main only</text>
+        <line x1="190" y1="424" x2="213" y2="424" stroke="#7CA7FF" stroke-width="1.5" marker-end="url(#m1b)"/>
+        <line x1="580" y1="424" x2="557" y2="424" stroke="#FF9E6D" stroke-width="1.5" marker-end="url(#m1o)"/>
+        <text x="385" y="501" text-anchor="middle" fill="#8B97A6" font-size="11">blue = read path · apricot = write path</text>
+      </svg>
+      </div>
+      <figcaption>Fig 1. Three trust zones. The agent can only reach the first. The credentials live in the third, where nothing in the repo can change who may use them.<span class="swipe"> Swipe sideways to see it all.</span></figcaption>
+    </figure>
+
+    <p>The design has four layers, and each one assumes the layer before it has already failed:</p>
+    <ol>
+      <li><strong>Workspace.</strong> What the agent can run and read.</li>
+      <li><strong>Identity.</strong> Which credentials exist, and what is able to assume them.</li>
+      <li><strong>Policy.</strong> What a plan is allowed to contain.</li>
+      <li><strong>Approval.</strong> Who says yes, and what exactly they are saying yes to.</li>
+    </ol>
+    <p class="callout">Only layers 2 to 4 are security boundaries. Layer 1 is a seatbelt: worth wearing, but it is not what stops the car.</p>
+
+    <h2 id="workspace">4. Layer 1: a workspace with nothing worth stealing</h2>
+    <p>The workspace is wherever the agent runs: a laptop, a dev container or a cloud sandbox. Give it context, not credentials.</p>
+    <h3>Give it context</h3>
+    <ul>
+      <li><strong>Your modules and conventions.</strong> A rules file in the repo that says which internal modules to use, how workspaces are laid out and what is off limits.</li>
+      <li><strong>Current provider docs.</strong> HashiCorp's <a href="https://developer.hashicorp.com/terraform/mcp-server" rel="noopener">Terraform MCP server</a> gives an agent live registry documentation and module inputs, so it is not relying on the provider schema in its training data.</li>
+      <li><strong>Cheap, offline checks.</strong> <code>terraform fmt</code>, <code>validate</code>, <code>tflint</code> and <code>terraform test</code> with mocked providers all run without cloud credentials.</li>
+    </ul>
+    <h3>Deny the dangerous commands</h3>
+    <p>Most coding agents support allow and deny lists for shell commands. This is the shape for Claude Code, checked in as <code>.claude/settings.json</code>. Other agents have an equivalent.</p>
+<pre><code>{
+  <span class="k">"permissions"</span>: {
+    <span class="k">"allow"</span>: [
+      <span class="s">"Bash(terraform fmt *)"</span>,
+      <span class="s">"Bash(terraform validate *)"</span>,
+      <span class="s">"Bash(terraform init -backend=false *)"</span>,
+      <span class="s">"Bash(terraform test *)"</span>,
+      <span class="s">"Bash(tflint *)"</span>
+    ],
+    <span class="k">"deny"</span>: [
+      <span class="s">"Bash(terraform apply *)"</span>,
+      <span class="s">"Bash(terraform destroy *)"</span>,
+      <span class="s">"Bash(terraform state *)"</span>,
+      <span class="s">"Bash(terraform import *)"</span>,
+      <span class="s">"Bash(aws *)"</span>,
+      <span class="s">"Read(**/*.tfstate)"</span>,
+      <span class="s">"Read(**/*.tfvars)"</span>,
+      <span class="s">"Read(**/.env)"</span>
+    ]
+  }
+}</code></pre>
+    <p>Deny rules win over allow rules, so the agent can format and validate but cannot apply, touch state, call the AWS CLI or read state files, which hold secrets in cleartext.</p>
+    <h3>Then assume the deny list fails</h3>
+    <p>A command filter is pattern matching on text. The <a href="https://code.claude.com/docs/en/permissions" rel="noopener">Claude Code documentation</a> is honest about this: a deny rule covers the invocation the agent usually produces and "isn't a security boundary around the program". Wrap the same command in <code>bash -c</code> and the pattern no longer matches.</p>
+    <p>So the real control in this layer is absence:</p>
+    <ul>
+      <li><strong>No cloud credentials in the environment.</strong> No <code>~/.aws</code> profile, no exported keys, no instance role with write access. On a developer laptop, that means a container or sandbox without the developer's own AWS session mounted in.</li>
+      <li><strong>Its own identity in Git.</strong> A bot account or project access token that can push branches and open merge requests, and nothing else. It cannot push to <code>main</code>, it is on no approver list, and everything it does is attributable.</li>
+      <li><strong>Fetched content is data.</strong> READMEs, issues and module docs can carry instructions aimed at the agent. The defence against prompt injection is structural: an agent with no credentials has nothing worth hijacking.</li>
+    </ul>
+
+    <h2 id="identity">5. Layer 2: credentials the agent cannot widen</h2>
+    <p>This layer does the heavy lifting. The AWS Well-Architected security pillar says to use temporary credentials for machine identities (<a href="https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/sec_identities_unique.html" rel="noopener">SEC02-BP02</a>), and CI systems have a clean way to do that: OIDC federation. The job gets a signed token from GitLab, and AWS STS swaps it for short-lived keys only if the role's trust policy matches the claims in that token.</p>
+
+    <figure>
+      <div class="figscroll">
+      <svg viewBox="0 0 760 392" role="img" aria-label="Sequence diagram of OIDC federation between GitLab CI and AWS. Step 1: the CI job asks GitLab for an ID token with an audience. Step 2: GitLab returns a signed JWT whose sub claim names the repository and the branch. Step 3: the job calls AWS STS AssumeRoleWithWebIdentity with the role ARN and the JWT. Step 4: STS fetches GitLab's signing keys and verifies the token. Step 5: STS checks the role trust policy, where the audience and sub must match, otherwise the call is denied. Step 6: STS returns temporary keys that expire within the hour. Step 7: the job runs terraform plan or apply against AWS APIs with those temporary keys." font-family="Geist, system-ui, sans-serif">
+        <defs>
+          <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker>
+          <marker id="m3t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3EE6C4"/></marker>
+        </defs>
+        <g stroke="#2A3848" stroke-dasharray="4 4">
+          <line x1="90" y1="54" x2="90" y2="374"/><line x1="290" y1="54" x2="290" y2="374"/><line x1="490" y1="54" x2="490" y2="374"/><line x1="680" y1="54" x2="680" y2="374"/>
+        </g>
+        <g font-size="12.5" font-weight="600" text-anchor="middle" fill="#E9EEF4">
+          <rect x="20" y="14" width="140" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="90" y="39">CI job</text>
+          <rect x="210" y="14" width="160" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="290" y="39">GitLab (OIDC issuer)</text>
+          <rect x="420" y="14" width="140" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="490" y="39">AWS STS</text>
+          <rect x="610" y="14" width="140" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="680" y="39">AWS APIs</text>
+        </g>
+
+        <line x1="90" y1="94" x2="288" y2="94" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/>
+        <line x1="290" y1="132" x2="92" y2="132" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m3)"/>
+        <line x1="90" y1="178" x2="488" y2="178" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/>
+        <line x1="490" y1="216" x2="292" y2="216" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/>
+        <line x1="490" y1="316" x2="92" y2="316" stroke="#3EE6C4" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m3t)"/>
+        <line x1="90" y1="358" x2="678" y2="358" stroke="#3EE6C4" stroke-width="1.5" marker-end="url(#m3t)"/>
+
+        <g font-size="11.5" text-anchor="middle" fill="#C7D0DA" paint-order="stroke" stroke="#0E131A" stroke-width="5" stroke-linejoin="round">
+          <text x="190" y="86">1. ask for an ID token (aud)</text>
+          <text x="190" y="124">2. signed JWT, sub = repo + ref</text>
+          <text x="290" y="170">3. AssumeRoleWithWebIdentity(role ARN, JWT)</text>
+          <text x="390" y="208">4. fetch signing keys, verify JWT</text>
+          <text x="290" y="308" fill="#3EE6C4">6. temporary keys, expire within the hour</text>
+          <text x="385" y="350" fill="#3EE6C4">7. terraform plan or apply, signed with the temporary keys</text>
+        </g>
+
+        <rect x="400" y="236" width="180" height="48" rx="8" fill="#131A23" stroke="#7CA7FF"/>
+        <text x="490" y="256" text-anchor="middle" fill="#7CA7FF" font-size="11.5" font-weight="600">5. trust policy check</text>
+        <text x="490" y="273" text-anchor="middle" fill="#8B97A6" font-size="11">aud and sub must match</text>
+        <text x="594" y="264" fill="#FF9E6D" font-size="11" paint-order="stroke" stroke="#0E131A" stroke-width="5" stroke-linejoin="round">no match: AccessDenied</text>
+      </svg>
+      </div>
+      <figcaption>Fig 2. OIDC federation between GitLab CI and AWS. There is no stored secret to leak, rotate or find on disk. The decision in step 5 is made by AWS, using a policy the repository cannot edit.<span class="swipe"> Swipe sideways to see it all.</span></figcaption>
+    </figure>
+
+    <p>The claim that matters is <code>sub</code>. GitLab builds it as <code>project_path:&lt;group&gt;/&lt;project&gt;:ref_type:&lt;type&gt;:ref:&lt;name&gt;</code> (<a href="https://docs.gitlab.com/ci/cloud_services/aws/" rel="noopener">GitLab docs</a>). That gives you a way to say, in IAM, that a role can only be used by one repository on one branch. Use it to split the pipeline into two roles.</p>
+<pre><code><span class="k">resource</span> <span class="s">"aws_iam_openid_connect_provider"</span> <span class="s">"gitlab"</span> {
+  <span class="k">url</span>            = <span class="s">"https://gitlab.com"</span> <span class="c"># or your self-managed GitLab URL</span>
+  <span class="k">client_id_list</span> = [<span class="s">"sts.amazonaws.com"</span>]
+}
+
+<span class="k">locals</span> {
+  <span class="k">repo</span> = <span class="s">"project_path:platform/infra-live"</span>
+  <span class="k">trust</span> = {
+    <span class="c"># any branch of this one repo may plan</span>
+    <span class="k">plan</span> = {
+      <span class="k">test</span> = <span class="s">"StringLike"</span>
+      <span class="k">sub</span>  = <span class="s">"${local.repo}:ref_type:branch:ref:*"</span>
+    }
+    <span class="c"># only the protected main branch may apply</span>
+    <span class="k">apply</span> = {
+      <span class="k">test</span> = <span class="s">"StringEquals"</span>
+      <span class="k">sub</span>  = <span class="s">"${local.repo}:ref_type:branch:ref:main"</span>
+    }
+  }
+}
+
+<span class="k">data</span> <span class="s">"aws_iam_policy_document"</span> <span class="s">"trust"</span> {
+  <span class="k">for_each</span> = local.trust
+
+  <span class="k">statement</span> {
+    <span class="k">actions</span> = [<span class="s">"sts:AssumeRoleWithWebIdentity"</span>]
+    <span class="k">principals</span> {
+      <span class="k">type</span>        = <span class="s">"Federated"</span>
+      <span class="k">identifiers</span> = [aws_iam_openid_connect_provider.gitlab.arn]
+    }
+    <span class="k">condition</span> {
+      <span class="k">test</span>     = <span class="s">"StringEquals"</span>
+      <span class="k">variable</span> = <span class="s">"gitlab.com:aud"</span>
+      <span class="k">values</span>   = [<span class="s">"sts.amazonaws.com"</span>]
+    }
+    <span class="k">condition</span> {
+      <span class="k">test</span>     = each.value.test
+      <span class="k">variable</span> = <span class="s">"gitlab.com:sub"</span>
+      <span class="k">values</span>   = [each.value.sub]
+    }
+  }
+}
+
+<span class="k">resource</span> <span class="s">"aws_iam_role"</span> <span class="s">"plan"</span> {
+  <span class="k">name</span>                 = <span class="s">"tf-plan-readonly"</span>
+  <span class="k">assume_role_policy</span>   = data.aws_iam_policy_document.trust[<span class="s">"plan"</span>].json
+  <span class="k">max_session_duration</span> = 3600
+}
+
+<span class="k">resource</span> <span class="s">"aws_iam_role_policy_attachment"</span> <span class="s">"plan_read"</span> {
+  <span class="k">role</span>       = aws_iam_role.plan.name
+  <span class="k">policy_arn</span> = <span class="s">"arn:aws:iam::aws:policy/ReadOnlyAccess"</span>
+}
+
+<span class="k">resource</span> <span class="s">"aws_iam_role_policy"</span> <span class="s">"plan_no_data"</span> {
+  <span class="k">name</span> = <span class="s">"deny-data-reads"</span>
+  <span class="k">role</span> = aws_iam_role.plan.id
+  <span class="k">policy</span> = jsonencode({
+    <span class="k">Version</span> = <span class="s">"2012-10-17"</span>
+    <span class="c"># ReadOnlyAccess still allows s3:GetObject, so deny data reads explicitly</span>
+    <span class="k">Statement</span> = [{
+      <span class="k">Effect</span>      = <span class="s">"Deny"</span>
+      <span class="k">Action</span>      = [<span class="s">"s3:GetObject"</span>, <span class="s">"secretsmanager:GetSecretValue"</span>]
+      <span class="k">NotResource</span> = <span class="s">"arn:aws:s3:::example-tf-state/*"</span>
+    }]
+  })
+}
+
+<span class="k">resource</span> <span class="s">"aws_iam_role"</span> <span class="s">"apply"</span> {
+  <span class="k">name</span>                 = <span class="s">"tf-apply"</span>
+  <span class="k">assume_role_policy</span>   = data.aws_iam_policy_document.trust[<span class="s">"apply"</span>].json
+  <span class="k">permissions_boundary</span> = aws_iam_policy.tf_boundary.arn
+  <span class="k">max_session_duration</span> = 3600
+}</code></pre>
+    <div class="tbl"><table>
+      <thead><tr><th>Role</th><th>Who can assume it</th><th>What it can do</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><code>tf-plan-readonly</code></td><td>Any branch pipeline in the infrastructure repo</td><td>Read APIs and read state. No writes, with explicit denies on secrets and object data.</td><td>An agent's merge request needs a real plan to be reviewable.</td></tr>
+        <tr><td><code>tf-apply</code></td><td>Only pipelines on protected <code>main</code></td><td>Create, change and delete, inside a <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html" rel="noopener">permissions boundary</a></td><td>A reviewed merge is the only route to a change.</td></tr>
+        <tr><td>Break-glass</td><td>Named humans, through SSO with MFA, with an alert on every use</td><td>Admin</td><td>Incidents happen. The emergency path should exist, be loud, and be tested.</td></tr>
+      </tbody>
+    </table></div>
+    <p>That split is the core of the design. An agent can edit <code>.gitlab-ci.yml</code> on its branch and point the plan job at <code>tf-apply</code>. STS will read a token whose <code>sub</code> ends in the agent's branch name, compare it with a trust policy that only accepts <code>ref:main</code>, and refuse. The control sits in AWS, where the agent cannot reach it.</p>
+    <p>It only holds if <code>main</code> is protected: no direct pushes, and merges need approval. The trust policy is exactly as strong as your branch protection.</p>
+    <h3>Three things people get wrong</h3>
+    <ul>
+      <li><strong>A plan is not harmless.</strong> <code>terraform plan</code> runs provider code and reads data sources, and the <a href="https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external" rel="noopener"><code>external</code></a> data source runs a local program. A plan job executes whatever the branch says, with the plan role's credentials. That is why the role has to be read-only.</li>
+      <li><strong>Read-only is broader than it sounds.</strong> The AWS managed <code>ReadOnlyAccess</code> policy can read S3 objects, which is data, not configuration. Deny data reads explicitly, as in the snippet.</li>
+      <li><strong>State is sensitive.</strong> The plan role has to read state, and state can contain secrets. Keep one state per workspace and environment, and encrypt the bucket with a KMS key. The <a href="https://developer.hashicorp.com/terraform/cli/commands/plan" rel="noopener">Terraform docs</a> give the same warning about saved plan files: treat them as sensitive artifacts.</li>
+    </ul>
+
+    <h2 id="policy">6. Layer 3: policy on the plan, not the prompt</h2>
+    <p>The plan is the only statement of what will actually happen. <code>terraform show -json</code> turns a saved plan into a <a href="https://developer.hashicorp.com/terraform/internals/json-format" rel="noopener">documented JSON format</a>, with one entry per resource under <code>resource_changes</code> and a list of actions for each. A replacement shows up as <code>["delete", "create"]</code>, so a policy that looks for <code>delete</code> catches both destroys and replacements.</p>
+    <p>This is a Rego policy for <a href="https://www.conftest.dev/" rel="noopener">Conftest</a>, which wraps Open Policy Agent. It encodes three of the controls from section 2.</p>
+<pre><code><span class="k">package</span> main
+
+<span class="k">import</span> rego.v1
+
+<span class="c"># Types that must never be deleted or replaced without a human-authored change</span>
+protected_types := {
+  <span class="s">"aws_db_instance"</span>, <span class="s">"aws_s3_bucket"</span>, <span class="s">"aws_kms_key"</span>,
+  <span class="s">"aws_ebs_volume"</span>, <span class="s">"aws_efs_file_system"</span>, <span class="s">"aws_route53_zone"</span>,
+}
+
+<span class="c"># Type prefixes an agent may not touch at all</span>
+human_only_prefixes := [<span class="s">"aws_iam_"</span>, <span class="s">"aws_organizations_"</span>, <span class="s">"aws_kms_"</span>]
+
+max_agent_changes := 25
+
+changes := [rc |
+  <span class="k">some</span> rc <span class="k">in</span> input.resource_changes
+  rc.mode == <span class="s">"managed"</span>
+  rc.change.actions != [<span class="s">"no-op"</span>]
+]
+
+<span class="c"># "delete" is present for both a destroy and a replace</span>
+<span class="k">deny</span> <span class="k">contains</span> msg <span class="k">if</span> {
+  <span class="k">some</span> rc <span class="k">in</span> changes
+  <span class="s">"delete"</span> <span class="k">in</span> rc.change.actions
+  rc.type <span class="k">in</span> protected_types
+  msg := sprintf(
+    <span class="s">"%s: delete or replace of %s needs a human-authored change"</span>,
+    [rc.address, rc.type],
+  )
+}
+
+<span class="k">deny</span> <span class="k">contains</span> msg <span class="k">if</span> {
+  input.meta.agent_authored
+  <span class="k">some</span> rc <span class="k">in</span> changes
+  <span class="k">some</span> prefix <span class="k">in</span> human_only_prefixes
+  startswith(rc.type, prefix)
+  msg := sprintf(
+    <span class="s">"%s: agent-authored changes may not touch %s"</span>,
+    [rc.address, rc.type],
+  )
+}
+
+<span class="k">deny</span> <span class="k">contains</span> msg <span class="k">if</span> {
+  input.meta.agent_authored
+  count(changes) &gt; max_agent_changes
+  msg := sprintf(
+    <span class="s">"plan changes %d resources; the agent limit is %d"</span>,
+    [count(changes), max_agent_changes],
+  )
+}</code></pre>
+    <p>The <code>input.meta.agent_authored</code> flag is not part of the plan. The pipeline adds it in the next section: it is true when the agent's bot account pushed the branch. OPA's own <a href="https://www.openpolicyagent.org/docs/terraform" rel="noopener">Terraform tutorial</a> goes a step further and weights each resource type, so the limit is a blast-radius score, not a count.</p>
+    <h3>Where the policy lives matters more than what it says</h3>
+    <ul>
+      <li><strong>Outside the repo it judges.</strong> If the policy sits next to the Terraform, the cheapest way to pass the check is to edit it, and an agent told to get the pipeline green can take that route. Publish the bundle from a separate repository with its own owners, and pull it by version.</li>
+      <li><strong>On every plan, human or agent.</strong> The baseline rules apply to everyone. The agent only gets extra ones.</li>
+      <li><strong>Before the plan as well.</strong> A policy on plan output runs after the plan has executed. Catch <code>external</code> data sources and <code>local-exec</code> provisioners with a static check of the HCL first. Conftest can parse HCL directly, and scanners such as tflint, Trivy or Checkov cover common misconfigurations at the same stage.</li>
+    </ul>
+    <p>One limit: values only known after apply are not in the plan JSON, so no plan-time policy sees everything. Policy narrows what a human has to check. It does not replace the human.</p>
+
+    <h2 id="approval">7. Layer 4: approval that means something</h2>
+    <p>This pipeline ties the layers together. Merge request pipelines run plan and policy with the read-only role. The pipeline on <code>main</code> plans again, runs the same policy, then waits for a person before applying the exact plan that was checked.</p>
+<pre><code><span class="k">stages</span>: [plan, policy, apply]
+
+<span class="k">default</span>:
+  <span class="c"># terraform, conftest and jq in one image; pin it by digest in real use</span>
+  <span class="k">image</span>: registry.example.com/platform/terraform-ci:2026.10
+
+<span class="k">.aws_oidc</span>:
+  <span class="k">id_tokens</span>:
+    <span class="k">AWS_ID_TOKEN</span>:
+      <span class="k">aud</span>: sts.amazonaws.com
+  <span class="k">before_script</span>:
+    - umask 077 &amp;&amp; echo <span class="s">"$AWS_ID_TOKEN"</span> &gt; /tmp/oidc-token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/oidc-token
+    - export AWS_ROLE_SESSION_NAME=<span class="s">"gitlab-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"</span>
+
+<span class="k">.mr_and_main</span>:
+  <span class="k">rules</span>:
+    - <span class="k">if</span>: $CI_PIPELINE_SOURCE == <span class="s">"schedule"</span>
+      <span class="k">when</span>: never
+    - <span class="k">if</span>: $CI_PIPELINE_SOURCE == <span class="s">"merge_request_event"</span>
+    - <span class="k">if</span>: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+<span class="k">plan</span>:
+  <span class="k">stage</span>: plan
+  <span class="k">extends</span>: [.aws_oidc, .mr_and_main]
+  <span class="k">variables</span>:
+    <span class="k">AWS_ROLE_ARN</span>: arn:aws:iam::111122223333:role/tf-plan-readonly
+  <span class="k">script</span>:
+    - terraform init -input=false -lockfile=readonly
+    - terraform plan -input=false -lock=false -out=tfplan
+    - terraform show -json tfplan &gt; tfplan.json
+  <span class="k">artifacts</span>:
+    <span class="k">paths</span>: [tfplan, tfplan.json]
+    <span class="k">access</span>: developer          <span class="c"># plan files can hold secrets in cleartext</span>
+    <span class="k">expire_in</span>: 1 day
+
+<span class="k">policy</span>:
+  <span class="k">stage</span>: policy
+  <span class="k">extends</span>: .mr_and_main
+  <span class="k">needs</span>: [plan]
+  <span class="k">script</span>:
+    - |
+      AGENT=false
+      if [ <span class="s">"$GITLAB_USER_LOGIN"</span> = <span class="s">"infra-agent"</span> ]; then AGENT=true; fi
+      jq --argjson agent <span class="s">"$AGENT"</span> <span class="s">'. + {meta: {agent_authored: $agent}}'</span> \
+        tfplan.json &gt; input.json
+    <span class="c"># the policy bundle lives outside this repo and is pulled by version</span>
+    - conftest pull registry.example.com/platform/tf-policy:1.8.0
+    - conftest test input.json
+
+<span class="k">apply</span>:
+  <span class="k">stage</span>: apply
+  <span class="k">extends</span>: .aws_oidc
+  <span class="k">needs</span>: [plan, policy]
+  <span class="k">variables</span>:
+    <span class="k">AWS_ROLE_ARN</span>: arn:aws:iam::111122223333:role/tf-apply
+  <span class="k">rules</span>:
+    - <span class="k">if</span>: $CI_PIPELINE_SOURCE == <span class="s">"schedule"</span>
+      <span class="k">when</span>: never
+    - <span class="k">if</span>: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      <span class="k">when</span>: manual
+  <span class="k">environment</span>: production        <span class="c"># protected, with deployment approvals</span>
+  <span class="k">resource_group</span>: tf-production  <span class="c"># one apply at a time</span>
+  <span class="k">script</span>:
+    - terraform init -input=false -lockfile=readonly
+    - terraform apply -input=false tfplan   <span class="c"># the reviewed plan, not a fresh one</span></code></pre>
+    <ul>
+      <li><strong><code>terraform apply tfplan</code></strong> applies the saved plan, the same file the policy job read and the approver looked at. If state has moved since, Terraform rejects the plan as stale.</li>
+      <li><strong><code>-lock=false</code> on plan</strong> is there because a read-only role cannot write the lock file (this assumes the S3 backend's native <a href="https://developer.hashicorp.com/terraform/language/backend/s3" rel="noopener"><code>use_lockfile</code></a> locking). The apply job takes the lock, and <code>resource_group</code> makes sure only one apply runs at a time.</li>
+      <li><strong><code>environment: production</code></strong> points at a GitLab <a href="https://docs.gitlab.com/ci/environments/protected_environments/" rel="noopener">protected environment</a> with <a href="https://docs.gitlab.com/ci/environments/deployment_approvals/" rel="noopener">deployment approvals</a>. By default, the person who triggered the pipeline cannot approve their own deployment.</li>
+      <li><strong><code>-lockfile=readonly</code></strong> stops a pipeline from silently accepting new provider versions or checksums. Provider upgrades become a reviewed change of their own.</li>
+    </ul>
+    <h3>Settings that make the approval real</h3>
+    <p>On the GitLab side I'd switch these on (most need Premium or Ultimate):</p>
+    <ul>
+      <li><a href="https://docs.gitlab.com/user/project/merge_requests/approvals/settings/" rel="noopener">Approval settings</a>: prevent approval by the merge request creator, prevent approvals by users who add commits, and remove all approvals when commits are added.</li>
+      <li>Code owners for <code>.gitlab-ci.yml</code>, IAM, network and state configuration, so a change to the guardrails themselves needs the platform team.</li>
+      <li>"Pipelines must succeed", so a failed policy job blocks the merge.</li>
+      <li>The pipeline definition included from a separate project, so the jobs above cannot be rewritten from a feature branch.</li>
+    </ul>
+    <h3>Who is the author when a human prompts an agent?</h3>
+    <p>My rule: the person who asked for the change is its author, and cannot be its approver. Two humans see every production change. The agent is neither of them.</p>
+    <p>The second human should review the plan, not just the diff. A good agent-written merge request says what the plan adds, changes and destroys, and calls out every replacement. Keep changes small enough that reading the plan takes minutes. That is the DORA small-batch advice again, and it matters more when the author can produce a thousand lines before you finish your coffee.</p>
+    <p class="callout">Approval fatigue is a failure mode too. If every agent change needs the same two senior engineers, they will start approving on trust. Tiers put human attention where the blast radius is.</p>
+
+    <h2 id="tiers">8. How much autonomy for which change</h2>
+    <p>Not every change deserves the same gate. Classify by what the plan does and where, not by who wrote it or how confident the agent sounds.</p>
+
+    <figure>
+      <div class="figscroll">
+      <svg viewBox="0 0 760 500" role="img" aria-label="Decision tree for how much autonomy an agent-proposed Terraform plan gets. First question: does it delete or replace stateful or protected resources? If yes, tier 3, human-authored. If no: does it touch IAM, KMS, the network edge or the pipeline itself? If yes, also tier 3. If no: is it a production workspace? If yes, tier 2, the agent proposes and a human approves the plan. If no: is it additive only and under the blast-radius limit? If yes, tier 1, auto-apply in non-production. Otherwise treat it as tier 2." font-family="Geist, system-ui, sans-serif">
+        <defs>
+          <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker>
+        </defs>
+        <rect x="40" y="14" width="300" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="190" y="39" text-anchor="middle" fill="#E9EEF4" font-size="13" font-weight="600">Agent-proposed plan</text>
+        <line x1="190" y1="54" x2="190" y2="82" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m2)"/>
+
+        <g font-size="12" text-anchor="middle" fill="#E9EEF4">
+          <rect x="40" y="84" width="300" height="56" rx="10" fill="#0E131A" stroke="#7CA7FF"/>
+          <text x="190" y="108">Deletes or replaces stateful</text><text x="190" y="126">or protected resources?</text>
+          <rect x="40" y="174" width="300" height="56" rx="10" fill="#0E131A" stroke="#7CA7FF"/>
+          <text x="190" y="198">Touches IAM, KMS, the network edge</text><text x="190" y="216">or the pipeline itself?</text>
+          <rect x="40" y="264" width="300" height="56" rx="10" fill="#0E131A" stroke="#7CA7FF"/>
+          <text x="190" y="297">Production workspace?</text>
+          <rect x="40" y="354" width="300" height="56" rx="10" fill="#0E131A" stroke="#7CA7FF"/>
+          <text x="190" y="378">Additive only, and under</text><text x="190" y="396">the blast-radius limit?</text>
+        </g>
+        <g stroke="#5D6977" stroke-width="1.5" marker-end="url(#m2)">
+          <line x1="190" y1="140" x2="190" y2="172"/>
+          <line x1="190" y1="230" x2="190" y2="262"/>
+          <line x1="190" y1="320" x2="190" y2="352"/>
+          <line x1="190" y1="410" x2="190" y2="442"/>
+          <line x1="340" y1="112" x2="448" y2="112"/>
+          <line x1="340" y1="202" x2="448" y2="202"/>
+          <line x1="340" y1="292" x2="448" y2="292"/>
+          <line x1="340" y1="382" x2="448" y2="382"/>
+        </g>
+        <g fill="#8B97A6" font-size="11">
+          <text x="200" y="161">no</text><text x="200" y="251">no</text><text x="200" y="341">no</text><text x="200" y="431">no</text>
+          <text x="394" y="105" text-anchor="middle">yes</text><text x="394" y="195" text-anchor="middle">yes</text><text x="394" y="285" text-anchor="middle">yes</text><text x="394" y="375" text-anchor="middle">yes</text>
+        </g>
+
+        <rect x="450" y="84" width="290" height="146" rx="10" fill="#131A23" stroke="#FF9E6D"/>
+        <text x="595" y="112" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">TIER 3 · HUMAN-AUTHORED</text>
+        <g fill="#8B97A6" font-size="11" text-anchor="middle">
+          <text x="595" y="138">The agent may draft and explain.</text>
+          <text x="595" y="156">A named engineer owns the change.</text>
+          <text x="595" y="174">Two approvals and a change window.</text>
+          <text x="595" y="204" fill="#5D6977">databases · IAM · KMS · edge · pipeline</text>
+        </g>
+
+        <rect x="450" y="264" width="290" height="56" rx="10" fill="#131A23" stroke="#7CA7FF"/>
+        <text x="595" y="287" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">TIER 2 · AGENT PROPOSES</text>
+        <text x="595" y="306" text-anchor="middle" fill="#8B97A6" font-size="11">A human approves the plan. Apply from main.</text>
+
+        <rect x="450" y="354" width="290" height="56" rx="10" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="595" y="377" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">TIER 1 · AUTO-APPLY IN NON-PROD</text>
+        <text x="595" y="396" text-anchor="middle" fill="#8B97A6" font-size="11">Policy pass is the approval. Review after.</text>
+
+        <rect x="40" y="444" width="300" height="40" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="190" y="469" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">Otherwise: treat as tier 2</text>
+        <text x="595" y="469" text-anchor="middle" fill="#5D6977" font-size="11">Tier 0 (docs, formatting, tests) never changes a plan.</text>
+      </svg>
+      </div>
+      <figcaption>Fig 3. Autonomy follows blast radius. Every question here can be answered by the policy job from the plan JSON and the workspace name, so the tier is computed, not self-declared.<span class="swipe"> Swipe sideways to see it all.</span></figcaption>
+    </figure>
+
+    <div class="tbl"><table>
+      <thead><tr><th>Tier</th><th>Example changes</th><th>What the agent may do</th><th>Gate</th></tr></thead>
+      <tbody>
+        <tr><td>0. Draft only</td><td>Docs, formatting, variable descriptions, tests</td><td>Open a merge request</td><td>Normal code review. Policy confirms the plan has no changes.</td></tr>
+        <tr><td>1. Auto-apply in non-prod</td><td>Additive resources in dev or sandbox, under the change limit</td><td>Propose, and the pipeline applies after a policy pass</td><td>Policy is the approval. Humans review a daily digest afterwards.</td></tr>
+        <tr><td>2. Agent proposes</td><td>Any production change, in-place updates, module upgrades</td><td>Propose only</td><td>Code owner approval on the merge request, then deployment approval on the plan.</td></tr>
+        <tr><td>3. Human-authored</td><td>Deleting or replacing stateful resources. IAM, KMS, organisation policies, the network edge. The pipeline and the policy.</td><td>Draft and explain</td><td>A named engineer owns it. Two approvals and a change window.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Start every repository at tier 2. Open tier 1 once you have data, and the data you want is a DORA metric you probably already track: change failure rate, split by agent-authored and human-authored changes. If the agent's number is no worse over a few months, widen its lane.</p>
+
+    <h2 id="drift">9. Drift detection as the safety net</h2>
+    <p>Guardrails fail quietly. Someone fixes something in the console during an incident, a credential leaks, or an apply half-finishes. Drift detection is how you find out.</p>
+    <p>At Avizva we ran a Terraform module registry for 5+ client environments, with remote state, locking and a monthly drift check. With agents producing more changes more often, I'd run it nightly. It is one more job in the same pipeline, on a schedule, using the read-only role.</p>
+<pre><code><span class="k">drift</span>:
+  <span class="k">stage</span>: plan
+  <span class="k">extends</span>: .aws_oidc
+  <span class="k">variables</span>:
+    <span class="k">AWS_ROLE_ARN</span>: arn:aws:iam::111122223333:role/tf-plan-readonly
+  <span class="k">rules</span>:
+    - <span class="k">if</span>: $CI_PIPELINE_SOURCE == <span class="s">"schedule"</span>
+  <span class="k">script</span>:
+    - terraform init -input=false -lockfile=readonly
+    <span class="c"># exit 0 = in sync, 1 = error, 2 = code and reality disagree</span>
+    - terraform plan -input=false -lock=false -detailed-exitcode</code></pre>
+    <p>The <code>-detailed-exitcode</code> flag gives three outcomes: 0 for no changes, 1 for an error and 2 for a non-empty diff. On <code>main</code>, a 2 means code and reality disagree, and the failed scheduled pipeline is your alert. In practice it points at one of three things:</p>
+    <ul>
+      <li><strong>An out-of-band change.</strong> Something wrote to the account outside the pipeline. Pair the drift job with a CloudTrail alert on any production write that did not come from a <code>tf-apply</code> session or the break-glass role.</li>
+      <li><strong>A partial apply.</strong> An apply failed halfway and nobody followed up.</li>
+      <li><strong>Merged but not applied.</strong> A change is sitting on <code>main</code> waiting for a deployment approval that nobody gave.</li>
+    </ul>
+    <p>An agent is well suited to triaging drift: read the plan, explain what changed and open a merge request that adopts or reverts it. In production that is still a tier 2 change. Nothing should auto-correct drift there, because drift during an incident is often a human doing the right thing.</p>
+
+    <h2 id="checklist">10. Rollout plan and checklist</h2>
+    <p>You do not need all of this on day one. This is the order I'd do it in, biggest risk reduction first.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Phase</th><th>What to do</th><th>Done when</th></tr></thead>
+      <tbody>
+        <tr><td>Week 1: identity</td><td>Remove static AWS keys from CI variables and from any environment an agent runs in. Create the OIDC provider and the plan and apply roles. Protect <code>main</code>.</td><td>A branch pipeline that tries to assume <code>tf-apply</code> gets AccessDenied. Test it on purpose.</td></tr>
+        <tr><td>Week 2: pipeline</td><td>Plan, policy, manual apply of the saved plan. Protected environment with deployment approvals. One apply at a time.</td><td>There is no route to an apply except a merge to <code>main</code> plus an approval.</td></tr>
+        <tr><td>Week 3: policy</td><td>Start with three rules: no deletes of protected types, no IAM changes from agents, a change-count limit. Move the policy to its own repository.</td><td>A deliberately bad merge request is blocked.</td></tr>
+        <tr><td>Week 4: workspace</td><td>Bot identity for the agent, a deny list, a sandbox with no credentials, a rules file with your module conventions.</td><td>The agent can open a merge request and can do nothing else.</td></tr>
+        <tr><td>Week 5 onwards: tiers and drift</td><td>Nightly drift job. Label agent-authored merge requests. Track change failure rate by author type.</td><td>You have the numbers to decide on tier 1.</td></tr>
+      </tbody>
+    </table></div>
+    <h3>The checklist</h3>
+    <ul>
+      <li>No long-lived cloud keys in the agent's environment, in CI variables or in the repo.</li>
+      <li>The apply role's trust policy is pinned to protected <code>main</code>, and a test from a branch proves it.</li>
+      <li>The plan role is read-only, with explicit denies for secrets and object data.</li>
+      <li>Policy runs on the plan JSON in every pipeline, and the policy code lives outside the repo.</li>
+      <li>The pipeline definition and the code owners file cannot change without the platform team.</li>
+      <li>Authors cannot approve, committers cannot approve, and approvals reset on new commits.</li>
+      <li>Apply uses the saved plan, and applies are serialised.</li>
+      <li><code>prevent_destroy</code> is set on stateful resources as the last line of defence.</li>
+      <li>Drift detection runs nightly, and out-of-band writes raise an alert.</li>
+      <li>A break-glass role exists, needs MFA, alerts on use and has been tested.</li>
+      <li>Agent-authored changes are labelled and measured.</li>
+    </ul>
+
+    <h2>The short version</h2>
+    <p>An agent that writes Terraform is a contributor, not an operator. Give it context instead of credentials, make the pipeline the only thing that can touch the cloud, let a policy read every plan before a person does, and keep the decision about who may apply somewhere the repository cannot reach.</p>
+    <p>If you only do one thing this week, do the first row of the rollout table: split plan and apply into two roles, pin the apply role to <code>main</code>, and delete the static keys. Most of the stories that make the news stop being possible at that point.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/agentic-developer-platform-golden-paths/">From IDP to agentic developer platform: golden paths as contracts agents can run</a><span>Golden paths as contracts AI agents can call: Backstage MCP actions, Crossplane XRDs, deterministic gates and Kargo promotions.</span></li>
+      <li><a href="/blog/ai-sre-agents-incident-response/">AI SRE agents on call: an autonomy ladder for incident response</a><span>What an AI agent should be allowed to do during an incident, level by level, with OPA-gated actions and a 90-day rollout plan.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
