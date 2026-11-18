@@ -1,0 +1,32 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "arjun-kanojia-portfolio.vercel.app"
+        }
+      ],
+      "destination": "https://arjunkanojia.com/",
+      "statusCode": 301
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "arjun-kanojia-portfolio.vercel.app"
+        }
+      ],
+      "destination": "https://arjunkanojia.com/$1",
+      "statusCode": 301
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/favicon.ico",
+      "destination": "/icon-192.png"
+    }
+  ]
+}
