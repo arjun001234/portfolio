@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing | Arjun Kanojia</title>
+<meta name="description" content="A practical design for LLM inference on Amazon EKS with Kubernetes 1.37: GPUs as DRA ResourceClaims with Karpenter, MIG versus time-slicing, Gateway API Inference Extension routing with InferencePool, HPA scale-to-zero and cold starts, gang scheduling status, device taints, failure modes and a rollout checklist.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing">
+<meta property="og:description" content="Kubernetes 1.37 changed the GPU inference playbook. DRA claims with Karpenter, MIG vs time-slicing, InferencePool routing, HPA scale-to-zero and where cold-start minutes go, gang scheduling on EKS, device taints and a checklist.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/">
+<meta property="og:image" content="https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing. Blog post by Arjun Kanojia.">
+<meta property="article:published_time" content="2026-11-02">
+<meta property="article:modified_time" content="2026-11-02">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/og.png">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<style>.prose .svgscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.prose .svgscroll svg{min-width:640px}</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing",
+  "description": "A practical design for LLM inference on Amazon EKS with Kubernetes 1.37: DRA ResourceClaims with Karpenter, GPU sharing with MIG or time-slicing, Gateway API Inference Extension routing, HPA scale-to-zero and cold starts, gang scheduling, device taints, failure modes and a rollout checklist.",
+  "image": "https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/og.png",
+  "datePublished": "2026-11-02",
+  "dateModified": "2026-11-02",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/llm-inference-eks-kubernetes-1-37/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "LLM inference, Kubernetes 1.37, Amazon EKS, GPU, Dynamic Resource Allocation, DRA, Karpenter, vLLM, Gateway API Inference Extension, InferencePool, HPA scale to zero, gang scheduling, MIG, time-slicing, platform engineering, AI platform"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">AI platform · November 2026</span>
+    <h1>Serving LLMs on EKS after Kubernetes 1.37: DRA, scale-to-zero and inference-aware routing</h1>
+    <p class="dek">Kubernetes 1.37 reached EKS in October, and with it the pieces that make GPU inference look like a normal platform workload: GPUs requested as claims, native scale-to-zero, device health in the scheduler, and gang scheduling in beta. This is how I'd put those pieces together on EKS, what still isn't ready, and where the cold-start minutes really go.</p>
+    <div class="meta"><time datetime="2026-11-02">2 November 2026</time> · 16 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#changed">What 1.37 changed for inference</a></li>
+        <li><a href="#arch">The reference architecture</a></li>
+        <li><a href="#dra">GPUs as claims: DRA with Karpenter on EKS</a></li>
+        <li><a href="#sharing">Sharing a GPU: whole, MIG or time-sliced</a></li>
+        <li><a href="#routing">Routing that understands the model server</a></li>
+        <li><a href="#zero">Scale-to-zero and where the seconds go</a></li>
+        <li><a href="#gang">Gang scheduling and multi-node models</a></li>
+        <li><a href="#health">Device taints and sick GPUs</a></li>
+        <li><a href="#upgrade">Upgrading GPU clusters to 1.37</a></li>
+        <li><a href="#failure">How inference platforms fail</a></li>
+        <li><a href="#plan">A rollout plan and checklist</a></li>
+      </ol>
+    </nav>
+
+    <p>Most platform teams I talk to are getting the same request: a product team wants to run an open-weight model themselves, for cost, data residency or latency, and they want it on the Kubernetes platform they already have. For a long time the honest answer was that Kubernetes treated a GPU as an opaque integer. You could ask for <code>nvidia.com/gpu: 1</code>, and that was about it. Sharing, health, topology and autoscaling were all bolted on from outside.</p>
+    <p>That's changing quickly. <a href="https://kubernetes.io/blog/2026/08/26/kubernetes-v1-37-release/" rel="noopener">Kubernetes 1.37</a> shipped on 26 August, and <a href="https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html" rel="noopener">Amazon EKS</a> added it on 13 October. KubeCon North America this year added a dedicated <a href="https://www.cncf.io/announcements/2026/08/10/cncf-reveals-kubecon-cloudnativecon-north-america-2026-schedule-adds-new-ai-inference-agentic-track/" rel="noopener">AI Inference and Agentic track</a>. The building blocks are now upstream, and the question has moved from "can Kubernetes do this?" to "which parts are production-ready on my managed cluster?"</p>
+    <p>I run EKS platforms day to day, and this year I took our clusters from 1.33 to 1.36 over about two months, so I tend to read release notes for what they mean in a managed cluster where you can't flip control plane feature gates. This post is that reading for GPU inference: a reference design, real manifests, and the gaps you should plan around.</p>
+
+    <h2 id="changed">1. What 1.37 changed for inference</h2>
+    <p>Not every headline feature is usable on EKS yet. Some are on by default, some are beta but off by default, and EKS doesn't let you change control plane feature gates. This is the table I'd hand to a team before they start designing:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Feature</th><th>Stage in 1.37</th><th>Usable on EKS 1.37?</th><th>Why it matters for inference</th></tr></thead>
+      <tbody>
+        <tr><td>Dynamic Resource Allocation core (<code>resource.k8s.io/v1</code>)</td><td>GA since 1.34</td><td>Yes, with a DRA driver you install</td><td>GPUs requested by attributes and capacity, not a count</td></tr>
+        <tr><td>DRA device taints and tolerations</td><td>GA</td><td>Yes</td><td>Keep a GPU with ECC or Xid errors away from new pods</td></tr>
+        <tr><td>DRA extended resource mapping</td><td>GA</td><td>Yes</td><td>Old <code>nvidia.com/gpu</code> requests can be served by a DRA driver, which eases migration</td></tr>
+        <tr><td>HPA scale to zero (<code>HPAScaleToZero</code>)</td><td>Beta, on by default</td><td>Yes, needs a metrics adapter</td><td>Idle model replicas can go to zero without an add-on</td></tr>
+        <tr><td>Gang scheduling (<code>Workload</code> / <code>PodGroup</code>, <code>scheduling.k8s.io/v1beta1</code>)</td><td>Beta, off by default</td><td>No, the gate isn't on</td><td>All-or-nothing placement for multi-node replicas</td></tr>
+        <tr><td>Pod certificates and ClusterTrustBundles</td><td>GA</td><td>Yes</td><td>Short-lived mTLS identity between the gateway and model servers</td></tr>
+        <tr><td>kube-proxy IPVS mode</td><td>Deprecated</td><td>Plan to move</td><td>Removal is planned, so new GPU clusters should start on iptables or nftables</td></tr>
+      </tbody>
+    </table></div>
+    <p>The <a href="https://kubernetes.io/blog/2026/09/03/kubernetes-v1-37-dra-updates/" rel="noopener">DRA updates post</a> and the <a href="https://kubernetes.io/blog/2026/09/02/kubernetes-v1-37-hpa-scale-to-zero-beta/" rel="noopener">HPA scale-to-zero post</a> on the Kubernetes blog go into more detail. The short version: device allocation, device health and scale-to-zero are things you can build on today. Gang scheduling still means Kueue or Volcano on EKS.</p>
+
+    <h2 id="arch">2. The reference architecture</h2>
+    <p>Here's the layout I'd draw for a team serving a few models on EKS. Requests come in through a Gateway API implementation that supports the <a href="https://gateway-api-inference-extension.sigs.k8s.io/" rel="noopener">Inference Extension</a>. The route points at an <code>InferencePool</code> instead of a Service. An endpoint picker chooses the model server for each request. Model servers run on a dedicated Karpenter NodePool for GPUs, and each pod gets its GPU through a ResourceClaim.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 560" role="img" aria-label="Reference architecture for LLM inference on EKS. Clients, apps and agents call a network load balancer and a Gateway API implementation such as Envoy Gateway, kgateway or Istio. The gateway asks an endpoint picker, over ext_proc, which model server should take each request; the picker scores pods on queue depth, KV cache use, prefix cache hits and loaded LoRA adapters, using metrics it reads from each pod. An HTTPRoute sends traffic to an InferencePool, which selects vLLM pods. The pods run on a Karpenter GPU NodePool, and each pod gets its GPU through a ResourceClaim allocated by the NVIDIA DRA driver from the node's ResourceSlice. One node is shown scaled to zero. Prometheus collects vLLM and DCGM metrics, and an HPA with minReplicas zero, fed by a metrics adapter, scales the model server Deployment." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="i1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="280" y="10" width="200" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="380" y="35" text-anchor="middle" fill="#E9EEF4" font-size="13" font-weight="600">Clients, apps, agents</text>
+        <line x1="380" y1="50" x2="380" y2="72" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i1)"/>
+        <rect x="120" y="74" width="380" height="48" rx="10" fill="#0E131A" stroke="#3EE6C4"/><text x="310" y="95" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">NLB + Gateway (Envoy Gateway / kgateway / Istio)</text><text x="310" y="112" text-anchor="middle" fill="#8B97A6" font-size="11">OpenAI-compatible API · auth · rate limits per tenant</text>
+        <rect x="560" y="74" width="180" height="88" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="650" y="96" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">Endpoint picker (EPP)</text><text x="650" y="114" text-anchor="middle" fill="#8B97A6" font-size="10.5">scores each pod on queue,</text><text x="650" y="129" text-anchor="middle" fill="#8B97A6" font-size="10.5">KV cache, prefix hits, LoRA</text><text x="650" y="148" text-anchor="middle" fill="#8B97A6" font-size="10.5">reads /metrics per pod</text>
+        <line x1="500" y1="98" x2="556" y2="98" stroke="#FF9E6D" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#i1)"/><text x="528" y="90" text-anchor="middle" fill="#FF9E6D" font-size="9.5">ext_proc</text>
+        <line x1="320" y1="122" x2="320" y2="150" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i1)"/>
+        <rect x="170" y="152" width="300" height="44" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="320" y="172" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">HTTPRoute → InferencePool</text><text x="320" y="188" text-anchor="middle" fill="#8B97A6" font-size="10.5">selects model-server pods by label</text>
+        <line x1="260" y1="196" x2="140" y2="262" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i1)"/>
+        <line x1="380" y1="196" x2="380" y2="262" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i1)"/>
+        <rect x="20" y="236" width="720" height="226" rx="14" fill="none" stroke="#3EE6C4"/>
+        <rect x="40" y="264" width="200" height="146" rx="10" fill="#0E131A" stroke="#2A3848"/>
+        <rect x="55" y="276" width="170" height="44" rx="8" fill="#131A23" stroke="#2A3848"/><text x="140" y="295" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">vLLM pod</text><text x="140" y="311" text-anchor="middle" fill="#8B97A6" font-size="10.5">model A · port 8000</text>
+        <rect x="55" y="330" width="170" height="34" rx="8" fill="#131A23" stroke="#7CA7FF"/><text x="140" y="351" text-anchor="middle" fill="#7CA7FF" font-size="11">ResourceClaim → 1 GPU</text>
+        <text x="140" y="394" text-anchor="middle" fill="#8B97A6" font-size="10">GPU node · DRA driver</text>
+        <rect x="280" y="264" width="200" height="146" rx="10" fill="#0E131A" stroke="#2A3848"/>
+        <rect x="295" y="276" width="170" height="44" rx="8" fill="#131A23" stroke="#2A3848"/><text x="380" y="295" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">vLLM pod</text><text x="380" y="311" text-anchor="middle" fill="#8B97A6" font-size="10.5">model A · port 8000</text>
+        <rect x="295" y="330" width="170" height="34" rx="8" fill="#131A23" stroke="#7CA7FF"/><text x="380" y="351" text-anchor="middle" fill="#7CA7FF" font-size="11">ResourceClaim → 1 GPU</text>
+        <text x="380" y="394" text-anchor="middle" fill="#8B97A6" font-size="10">GPU node · DRA driver</text>
+        <rect x="520" y="264" width="200" height="146" rx="10" fill="none" stroke="#5D6977" stroke-dasharray="5 4"/>
+        <text x="620" y="302" text-anchor="middle" fill="#8B97A6" font-size="12" font-weight="600">model B</text><text x="620" y="322" text-anchor="middle" fill="#8B97A6" font-size="10.5">scaled to zero</text><text x="620" y="352" text-anchor="middle" fill="#8B97A6" font-size="10.5">Karpenter launches a node</text><text x="620" y="368" text-anchor="middle" fill="#8B97A6" font-size="10.5">when a pod is pending</text>
+        <text x="36" y="448" fill="#3EE6C4" font-size="11" font-weight="600">KARPENTER GPU NODEPOOL · TAINTED · DRA ENABLED</text>
+        <rect x="20" y="490" width="340" height="50" rx="10" fill="#131A23" stroke="#2A3848"/><text x="190" y="511" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Prometheus</text><text x="190" y="528" text-anchor="middle" fill="#8B97A6" font-size="10.5">vLLM metrics · DCGM GPU metrics · gateway</text>
+        <rect x="400" y="490" width="340" height="50" rx="10" fill="#131A23" stroke="#2A3848"/><text x="570" y="511" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">HPA (minReplicas: 0)</text><text x="570" y="528" text-anchor="middle" fill="#8B97A6" font-size="10.5">external metric via metrics adapter</text>
+        <line x1="360" y1="515" x2="396" y2="515" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i1)"/>
+        <line x1="570" y1="490" x2="570" y2="466" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#i1)"/><text x="580" y="481" fill="#8B97A6" font-size="10">scales Deployment</text>
+      </svg>
+      </div>
+      <figcaption>Fig 1. Reference layout. The gateway handles tenants and auth, the endpoint picker chooses a model server per request, and GPUs reach pods only through ResourceClaims on a dedicated NodePool.</figcaption>
+    </figure>
+
+    <p>Three decisions in that picture matter more than they look:</p>
+    <ul>
+      <li><strong>GPU nodes are their own pool, and they're tainted.</strong> Nothing lands on a node that costs several dollars an hour unless it asked for a GPU. That one rule stops a lot of waste.</li>
+      <li><strong>The route targets an InferencePool, not a Service.</strong> A Service balances connections. An inference pool balances <em>work</em>, which for LLMs is very uneven. I'll come back to why in section 5.</li>
+      <li><strong>Autoscaling uses demand signals, not GPU utilisation.</strong> GPU utilisation from DCGM tells you a kernel is running, not whether users are waiting. Queue depth and time to first token are the signals that match what users feel.</li>
+    </ul>
+
+    <h2 id="dra">3. GPUs as claims: DRA with Karpenter on EKS</h2>
+    <p>With the classic device plugin, a pod asks for a number of GPUs and the scheduler counts them. With <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/" rel="noopener">Dynamic Resource Allocation</a>, the driver on each node publishes a <code>ResourceSlice</code> that describes every device: product, memory, architecture, MIG profile. Pods reference a <code>ResourceClaim</code> that asks for devices matching a CEL expression. The scheduler then allocates a specific device that fits.</p>
+    <p>On EKS you install the driver yourself. AWS documents both the device plugin and the DRA route in its <a href="https://docs.aws.amazon.com/eks/latest/userguide/device-management-nvidia.html" rel="noopener">NVIDIA device management guide</a>, and the <a href="https://awslabs.github.io/ai-on-eks/docs/guidance/dynamic-resource-allocation" rel="noopener">AI on EKS guidance</a> has a fuller walkthrough. The driver is <a href="https://github.com/NVIDIA/k8s-dra-driver-gpu" rel="noopener">NVIDIA's k8s-dra-driver-gpu</a>. Karpenter needs to know about DRA too, because it has to work out which instance type will satisfy a claim before the node exists. Karpenter's <a href="https://karpenter.sh/docs/tasks/dra/" rel="noopener">DRA support is still alpha</a>, behind a Helm setting:</p>
+<pre><code><span class="c"># karpenter Helm values: DRA-aware provisioning (alpha). Use --reset-then-reuse-values on upgrade.</span>
+<span class="k">settings</span>:
+  <span class="k">enableDRA</span>: true
+---
+<span class="k">apiVersion</span>: karpenter.sh/v1
+<span class="k">kind</span>: NodePool
+<span class="k">metadata</span>:
+  <span class="k">name</span>: gpu-inference-dra
+<span class="k">spec</span>:
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>: { <span class="k">platform.example.com/gpu-mode</span>: dra }   <span class="c"># never mix DRA and device-plugin nodes</span>
+    <span class="k">spec</span>:
+      <span class="k">nodeClassRef</span>: { <span class="k">group</span>: karpenter.k8s.aws, <span class="k">kind</span>: EC2NodeClass, <span class="k">name</span>: gpu-al2023 }
+      <span class="k">taints</span>:
+        - { <span class="k">key</span>: nvidia.com/gpu, <span class="k">effect</span>: NoSchedule }
+      <span class="k">requirements</span>:
+        - { <span class="k">key</span>: karpenter.k8s.aws/instance-family, <span class="k">operator</span>: In, <span class="k">values</span>: [g6e, g6, p5] }
+        - { <span class="k">key</span>: karpenter.sh/capacity-type, <span class="k">operator</span>: In, <span class="k">values</span>: [on-demand] }
+      <span class="k">expireAfter</span>: 336h
+  <span class="k">limits</span>:
+    <span class="k">cpu</span>: <span class="s">"768"</span>                              <span class="c"># a hard ceiling on what a bad HPA can spend</span>
+  <span class="k">disruption</span>:
+    <span class="k">consolidationPolicy</span>: WhenEmpty           <span class="c"># don't evict a loaded model to save one node</span>
+    <span class="k">consolidateAfter</span>: 20m</code></pre>
+    <p>Then the claim. A <code>ResourceClaimTemplate</code> gives each pod its own claim, so each replica gets its own GPU. The selector is CEL against the attributes the driver publishes, so you ask for "a GPU with at least 40 GiB" instead of naming an instance type:</p>
+<pre><code><span class="k">apiVersion</span>: resource.k8s.io/v1
+<span class="k">kind</span>: ResourceClaimTemplate
+<span class="k">metadata</span>:
+  <span class="k">name</span>: gpu-40g
+  <span class="k">namespace</span>: llm-serving
+<span class="k">spec</span>:
+  <span class="k">spec</span>:
+    <span class="k">devices</span>:
+      <span class="k">requests</span>:
+        - <span class="k">name</span>: gpu
+          <span class="k">exactly</span>:
+            <span class="k">deviceClassName</span>: gpu.nvidia.com
+            <span class="k">count</span>: 1
+            <span class="k">selectors</span>:
+              - <span class="k">cel</span>:
+                  <span class="k">expression</span>: <span class="s">"device.capacity['gpu.nvidia.com'].memory.compareTo(quantity('40Gi')) &gt;= 0"</span>
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>: { <span class="k">name</span>: qwen3-8b, <span class="k">namespace</span>: llm-serving }
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 1
+  <span class="k">selector</span>: { <span class="k">matchLabels</span>: { <span class="k">app</span>: qwen3-8b } }
+  <span class="k">template</span>:
+    <span class="k">metadata</span>: { <span class="k">labels</span>: { <span class="k">app</span>: qwen3-8b } }
+    <span class="k">spec</span>:
+      <span class="k">tolerations</span>: [{ <span class="k">key</span>: nvidia.com/gpu, <span class="k">operator</span>: Exists, <span class="k">effect</span>: NoSchedule }]
+      <span class="k">resourceClaims</span>:
+        - { <span class="k">name</span>: gpu, <span class="k">resourceClaimTemplateName</span>: gpu-40g }
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: vllm
+          <span class="k">image</span>: 123456789012.dkr.ecr.ap-south-1.amazonaws.com/vllm-openai:pinned   <span class="c"># mirrored, scanned, pinned</span>
+          <span class="k">args</span>: [<span class="s">"--model"</span>, <span class="s">"/models/qwen3-8b"</span>, <span class="s">"--max-model-len"</span>, <span class="s">"16384"</span>,
+                 <span class="s">"--gpu-memory-utilization"</span>, <span class="s">"0.90"</span>]
+          <span class="k">ports</span>: [{ <span class="k">containerPort</span>: 8000, <span class="k">name</span>: http }]
+          <span class="k">resources</span>:
+            <span class="k">claims</span>: [{ <span class="k">name</span>: gpu }]
+          <span class="k">readinessProbe</span>:
+            <span class="k">httpGet</span>: { <span class="k">path</span>: /health, <span class="k">port</span>: 8000 }
+            <span class="k">periodSeconds</span>: 5
+          <span class="k">startupProbe</span>:                           <span class="c"># model load can take minutes</span>
+            <span class="k">httpGet</span>: { <span class="k">path</span>: /health, <span class="k">port</span>: 8000 }
+            <span class="k">periodSeconds</span>: 10
+            <span class="k">failureThreshold</span>: 60</code></pre>
+    <p>Two things here are worth slowing down for. First, Karpenter's docs are clear that you shouldn't let a device plugin and a DRA driver manage the same GPUs, and that pods asking for <code>nvidia.com/gpu</code> as an extended resource aren't treated as DRA pods by Karpenter. So run DRA on its own NodePool with its own label, and migrate one model at a time. Second, the startup probe is not optional. Without it, a liveness probe will happily kill a pod that's halfway through loading 16 GB of weights, and you get a restart loop that looks like a GPU problem.</p>
+    <p class="callout">Because Karpenter's DRA support is alpha, I wouldn't make it the only path for a critical model yet. A sensible split for 2026: device plugin with whole GPUs for the production model, a DRA NodePool for new and shared workloads, and a date to revisit once Karpenter's support graduates.</p>
+
+    <h2 id="sharing">4. Sharing a GPU: whole, MIG or time-sliced</h2>
+    <p>The most expensive mistake in GPU platforms is giving a small model a whole large GPU and leaving it 10% busy. The opposite mistake, packing models onto a shared GPU with no isolation, shows up as noisy-neighbour latency that's very hard to debug. The industry has three standard options, and DRA lets you request any of them through the same claim API.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Mode</th><th>Memory isolation</th><th>Compute isolation</th><th>Good for</th><th>Watch out for</th></tr></thead>
+      <tbody>
+        <tr><td>Whole GPU</td><td>Full</td><td>Full</td><td>Production models with a latency SLO, anything using most of the memory</td><td>Low utilisation on small models</td></tr>
+        <tr><td>MIG slice</td><td>Hardware-enforced</td><td>Dedicated SMs</td><td>Several small production models on A100 or H100 class GPUs</td><td>Fixed profiles, only on supported GPUs, re-partitioning needs the GPU drained</td></tr>
+        <tr><td>Time-slicing</td><td>None</td><td>Takes turns</td><td>Dev, notebooks, CI tests, latency-tolerant batch</td><td>One tenant can run another out of memory; no fairness under load</td></tr>
+        <tr><td>MPS</td><td>Limits possible, not hardware-enforced</td><td>Concurrent, with limits</td><td>Many small inference processes from one trusted team</td><td>A fault in one client can affect the others</td></tr>
+      </tbody>
+    </table></div>
+    <p>NVIDIA's <a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/" rel="noopener">MIG user guide</a> lists which GPUs and profiles are supported. On AWS, that generally means the A100 and H100 class instances. The L4 and L40S GPUs in the g6 and g6e families don't support MIG, so on those the choice is whole GPU or time-slicing.</p>
+    <p>With the NVIDIA DRA driver, time-slicing is a property of the claim rather than a node-wide config file. That's a real improvement, because one team's dev namespace can share GPUs while production on the same cluster doesn't:</p>
+<pre><code><span class="c"># A shared claim: every pod that references it shares the same time-sliced GPU</span>
+<span class="k">apiVersion</span>: resource.k8s.io/v1
+<span class="k">kind</span>: ResourceClaim
+<span class="k">metadata</span>:
+  <span class="k">name</span>: dev-shared-gpu
+  <span class="k">namespace</span>: team-search-dev
+<span class="k">spec</span>:
+  <span class="k">devices</span>:
+    <span class="k">requests</span>:
+      - <span class="k">name</span>: gpu
+        <span class="k">exactly</span>: { <span class="k">deviceClassName</span>: gpu.nvidia.com }
+    <span class="k">config</span>:
+      - <span class="k">requests</span>: [<span class="s">"gpu"</span>]
+        <span class="k">opaque</span>:
+          <span class="k">driver</span>: gpu.nvidia.com
+          <span class="k">parameters</span>:
+            <span class="k">apiVersion</span>: resource.nvidia.com/v1beta1
+            <span class="k">kind</span>: GpuConfig
+            <span class="k">sharing</span>:
+              <span class="k">strategy</span>: TimeSlicing
+              <span class="k">timeSlicingConfig</span>: { <span class="k">interval</span>: Long }</code></pre>
+    <p>The way I'd decide for each model is a short tree. The first question is always size, because a model that doesn't fit on one GPU settles most of the other questions for you.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 370" role="img" aria-label="Decision tree for GPU allocation. First question: does one model replica need more than one GPU? If yes, ask whether it spans more than one node. If it spans nodes, use a multi-node replica with LeaderWorkerSet and gang placement through Kueue. If it fits on one node, use whole GPUs on one node with tensor parallelism, for example p5 or g6e.12xlarge. If one replica fits on less than one GPU, ask whether it needs hard isolation or a latency SLO. If yes, use a MIG slice with its own memory and compute, on A100 or H100 class GPUs. If no, use time-slicing or MPS, which has no memory isolation and suits dev, batch and small models. Whatever you choose, request it with a ResourceClaim, not a count." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="i2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="210" y="14" width="340" height="44" rx="10" fill="#0E131A" stroke="#3EE6C4"/><text x="380" y="41" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">Does one replica need more than one GPU?</text>
+        <line x1="290" y1="58" x2="200" y2="108" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="232" y="80" fill="#8B97A6" font-size="11">yes</text>
+        <line x1="470" y1="58" x2="560" y2="108" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="520" y="80" fill="#8B97A6" font-size="11">no</text>
+        <rect x="70" y="110" width="230" height="44" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="185" y="137" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">Does it span more than one node?</text>
+        <rect x="420" y="110" width="320" height="44" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="580" y="137" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">Needs hard isolation or a latency SLO?</text>
+        <line x1="150" y1="154" x2="100" y2="218" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="104" y="190" fill="#8B97A6" font-size="11">yes</text>
+        <line x1="220" y1="154" x2="280" y2="218" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="262" y="190" fill="#8B97A6" font-size="11">no</text>
+        <line x1="540" y1="154" x2="485" y2="218" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="490" y="190" fill="#8B97A6" font-size="11">yes</text>
+        <line x1="620" y1="154" x2="668" y2="218" stroke="#5D6977" stroke-width="1.5" marker-end="url(#i2)"/><text x="656" y="190" fill="#8B97A6" font-size="11">no</text>
+        <rect x="10" y="220" width="178" height="72" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="99" y="242" text-anchor="middle" fill="#FF9E6D" font-size="12" font-weight="600">Multi-node replica</text><text x="99" y="261" text-anchor="middle" fill="#8B97A6" font-size="10.5">LeaderWorkerSet +</text><text x="99" y="277" text-anchor="middle" fill="#8B97A6" font-size="10.5">gang placement (Kueue)</text>
+        <rect x="196" y="220" width="178" height="72" rx="10" fill="#131A23" stroke="#FF9E6D"/><text x="285" y="242" text-anchor="middle" fill="#FF9E6D" font-size="12" font-weight="600">Whole GPUs, one node</text><text x="285" y="261" text-anchor="middle" fill="#8B97A6" font-size="10.5">tensor parallel</text><text x="285" y="277" text-anchor="middle" fill="#8B97A6" font-size="10.5">e.g. p5, g6e.12xlarge</text>
+        <rect x="392" y="220" width="178" height="72" rx="10" fill="#131A23" stroke="#3EE6C4"/><text x="481" y="242" text-anchor="middle" fill="#3EE6C4" font-size="12" font-weight="600">MIG slice</text><text x="481" y="261" text-anchor="middle" fill="#8B97A6" font-size="10.5">own memory + SMs</text><text x="481" y="277" text-anchor="middle" fill="#8B97A6" font-size="10.5">A100 / H100 class only</text>
+        <rect x="578" y="220" width="174" height="72" rx="10" fill="#131A23" stroke="#3EE6C4"/><text x="665" y="242" text-anchor="middle" fill="#3EE6C4" font-size="12" font-weight="600">Time-slicing / MPS</text><text x="665" y="261" text-anchor="middle" fill="#8B97A6" font-size="10.5">no memory isolation</text><text x="665" y="277" text-anchor="middle" fill="#8B97A6" font-size="10.5">dev, batch, small models</text>
+        <line x1="20" y1="318" x2="740" y2="318" stroke="#2A3848"/>
+        <text x="380" y="345" text-anchor="middle" fill="#E9EEF4" font-size="12">Whatever you choose, request it with a ResourceClaim, not a count,</text>
+        <text x="380" y="362" text-anchor="middle" fill="#8B97A6" font-size="11">so the choice lives in the workload's manifest and can change per namespace</text>
+      </svg>
+      </div>
+      <figcaption>Fig 2. Choosing a GPU allocation per model. Size decides first; isolation and SLO decide the rest.</figcaption>
+    </figure>
+
+    <h2 id="routing">5. Routing that understands the model server</h2>
+    <p>A normal Service spreads connections roughly evenly. That works for web APIs, where requests cost about the same. LLM requests don't. A 50-token prompt and a 20,000-token prompt with a long answer can differ by a factor of a hundred in GPU time. Round-robin sends the next request to a replica that's already full, while the one next to it sits idle. Worse, it ignores the prefix cache: if a replica already holds the KV cache for a long shared system prompt, sending the follow-up there skips a lot of work.</p>
+    <p>The <a href="https://gateway-api-inference-extension.sigs.k8s.io/" rel="noopener">Gateway API Inference Extension</a> fixes this with two pieces. An <code>InferencePool</code>, now stable at <code>inference.networking.k8s.io/v1</code>, describes a set of model-server pods. An endpoint picker (EPP), called by the gateway through Envoy's ext_proc, chooses a pod for each request using live metrics from the model servers: queue length, KV cache use, prefix cache affinity and which LoRA adapters are loaded.</p>
+<pre><code><span class="k">apiVersion</span>: inference.networking.k8s.io/v1
+<span class="k">kind</span>: InferencePool
+<span class="k">metadata</span>:
+  <span class="k">name</span>: qwen3-8b
+  <span class="k">namespace</span>: llm-serving
+<span class="k">spec</span>:
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>: { <span class="k">app</span>: qwen3-8b }
+  <span class="k">targetPorts</span>:
+    - <span class="k">number</span>: 8000
+  <span class="k">endpointPickerRef</span>:
+    <span class="k">name</span>: qwen3-8b-epp
+    <span class="k">port</span>: { <span class="k">number</span>: 9002 }
+    <span class="k">failureMode</span>: FailClose          <span class="c"># if the picker is down, fail rather than route blindly</span>
+---
+<span class="k">apiVersion</span>: gateway.networking.k8s.io/v1
+<span class="k">kind</span>: HTTPRoute
+<span class="k">metadata</span>:
+  <span class="k">name</span>: qwen3-8b
+  <span class="k">namespace</span>: llm-serving
+<span class="k">spec</span>:
+  <span class="k">parentRefs</span>: [{ <span class="k">name</span>: inference-gateway, <span class="k">namespace</span>: gateway-system }]
+  <span class="k">rules</span>:
+    - <span class="k">matches</span>: [{ <span class="k">path</span>: { <span class="k">type</span>: PathPrefix, <span class="k">value</span>: /v1/ } }]
+      <span class="k">backendRefs</span>:
+        - <span class="k">group</span>: inference.networking.k8s.io
+          <span class="k">kind</span>: InferencePool
+          <span class="k">name</span>: qwen3-8b
+      <span class="k">timeouts</span>: { <span class="k">request</span>: 300s }   <span class="c"># long generations are normal</span></code></pre>
+    <p><code>failureMode</code> is a real trade-off, not a default to copy. <code>FailOpen</code> keeps traffic flowing if the picker is unavailable, but routes it without load awareness, which can overload a replica during exactly the kind of spike that took the picker down. <code>FailClose</code> returns errors instead. For an internal assistant I'd pick FailOpen. For anything with paying users and a tight SLO, I'd pick FailClose and run the picker with several replicas and a PodDisruptionBudget, like any other critical part of the data path.</p>
+    <p>The gateway is also where tenancy belongs. Rate limits per tenant, token budgets and auth live there, not in the model server. The <a href="https://sre.google/sre-book/handling-overload/" rel="noopener">Google SRE chapter on handling overload</a> applies directly: reject early and cheaply at the edge with a clear 429, rather than letting requests queue inside a GPU server until they time out.</p>
+
+    <h2 id="zero">6. Scale-to-zero and where the seconds go</h2>
+    <p>HPA scale-to-zero being on by default is the change most teams will try first, because idle GPUs are the biggest line on the bill. The mechanics are simple: <code>minReplicas: 0</code> is allowed when the HPA uses at least one Object or External metric. That's because a pod metric can't exist when there are no pods. You also need a metrics adapter (Prometheus Adapter, KEDA's metrics server or a cloud adapter), because EKS doesn't install one.</p>
+    <p>The hard part isn't the HPA. It's the cold start. Scaling a GPU workload from zero isn't like starting a Go service. Here's where the time goes, with illustrative ranges for a mid-sized model. Measure your own, because they vary a lot with model size and instance type.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 330" role="img" aria-label="Illustrative cold-start timeline for scaling an LLM server from zero, from 0 to 10 minutes. Untuned: GPU node launch about 2 minutes, driver and DRA ready about 1 minute, image pull about 3 minutes, model weights load about 3 minutes, warm-up about 40 seconds, for roughly 9 to 10 minutes in total. Tuned: node launch about 1.5 minutes with diversified GPU types, driver ready in 30 seconds with an AMI that already has the driver, image pull about 30 seconds from a cached image, weights load about 1 minute streamed from S3 to local NVMe, and warm-up about 30 seconds, for roughly 4 minutes in total." font-family="Geist, system-ui, sans-serif">
+        <rect x="150" y="12" width="14" height="10" rx="2" fill="#FF9E6D"/><text x="170" y="21" fill="#E9EEF4" font-size="11">untuned · about 9 to 10 min</text>
+        <rect x="350" y="12" width="14" height="10" rx="2" fill="#3EE6C4"/><text x="370" y="21" fill="#E9EEF4" font-size="11">tuned · about 4 min</text>
+        <g stroke="#1F2A36"><line x1="150" y1="36" x2="150" y2="272"/><line x1="268" y1="36" x2="268" y2="272"/><line x1="386" y1="36" x2="386" y2="272"/><line x1="504" y1="36" x2="504" y2="272"/><line x1="622" y1="36" x2="622" y2="272"/><line x1="740" y1="36" x2="740" y2="272"/></g>
+        <g fill="#E9EEF4" font-size="11.5"><text x="20" y="62">GPU node launch</text><text x="20" y="108">Driver + DRA ready</text><text x="20" y="154">Image pull</text><text x="20" y="200">Weights load</text><text x="20" y="246">Warm-up + ready</text></g>
+        <rect x="150" y="46" width="118" height="14" rx="3" fill="#FF9E6D"/>
+        <rect x="150" y="64" width="89" height="14" rx="3" fill="#3EE6C4"/><text x="246" y="75" fill="#8B97A6" font-size="10">diversified GPU types</text>
+        <rect x="268" y="92" width="59" height="14" rx="3" fill="#FF9E6D"/>
+        <rect x="239" y="110" width="30" height="14" rx="3" fill="#3EE6C4"/><text x="276" y="121" fill="#8B97A6" font-size="10">driver baked into the AMI</text>
+        <rect x="327" y="138" width="177" height="14" rx="3" fill="#FF9E6D"/>
+        <rect x="269" y="156" width="30" height="14" rx="3" fill="#3EE6C4"/><text x="306" y="167" fill="#8B97A6" font-size="10">image cached on a data-volume snapshot</text>
+        <rect x="504" y="184" width="177" height="14" rx="3" fill="#FF9E6D"/>
+        <rect x="299" y="202" width="59" height="14" rx="3" fill="#3EE6C4"/><text x="365" y="213" fill="#8B97A6" font-size="10">weights streamed from S3 to local NVMe</text>
+        <rect x="681" y="230" width="40" height="14" rx="3" fill="#FF9E6D"/>
+        <rect x="358" y="248" width="30" height="14" rx="3" fill="#3EE6C4"/><text x="395" y="259" fill="#8B97A6" font-size="10">probe sends a real prompt</text>
+        <line x1="150" y1="272" x2="740" y2="272" stroke="#2A3848"/>
+        <g fill="#5D6977" font-size="11" text-anchor="middle"><text x="150" y="290">0</text><text x="268" y="290">2 min</text><text x="386" y="290">4 min</text><text x="504" y="290">6 min</text><text x="622" y="290">8 min</text><text x="740" y="290">10 min</text></g>
+        <text x="445" y="318" text-anchor="middle" fill="#8B97A6" font-size="10.5">illustrative ranges for a mid-sized model; measure your own</text>
+      </svg>
+      </div>
+      <figcaption>Fig 3. Scaling an LLM server from zero. Node launch is rarely the slowest step: image pull and weight loading usually are, and both can be engineered down.</figcaption>
+    </figure>
+
+    <p>The fixes are well known by now. Bake the NVIDIA driver into the AMI rather than installing it at boot. Pre-cache the large serving image on a data-volume snapshot, or use lazy loading, so a new node doesn't pull 10 GB before it can do anything. Keep weights out of the image entirely, and stream them from S3 or a shared file system onto local NVMe. vLLM supports streaming loaders for this. And make the readiness check send a tiny real prompt, so "ready" means "can produce a token", not "process started".</p>
+    <p>Even tuned, a few minutes is far too long for a chat request to wait. So scale-to-zero is a decision per workload, not a platform default:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Workload</th><th>Scale to zero?</th><th>Signal to scale on</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>User-facing chat or agent with an SLO</td><td>No, keep at least 1 warm (2 across AZs)</td><td>Queue depth per replica, time to first token</td><td>Users won't wait minutes for a first token</td></tr>
+        <tr><td>Batch or async jobs (summaries, embeddings, evals)</td><td>Yes</td><td>Queue length in SQS or Kafka as an External metric</td><td>The queue holds the work during the cold start, so nothing is lost</td></tr>
+        <tr><td>Long-tail fine-tunes and LoRA variants</td><td>Usually, or share one base model with LoRA adapters</td><td>Requests per adapter</td><td>Many adapters on one warm base is often cheaper than many cold models</td></tr>
+        <tr><td>Dev and preview environments</td><td>Yes, with an off-hours floor of zero</td><td>Schedule plus requests</td><td>Idle most of the time; a slow first request is acceptable</td></tr>
+      </tbody>
+    </table></div>
+    <p>For interactive models that you still want to scale down sometimes, the standard pattern is a component that holds the request while the replica starts, like the activator in Knative and KServe or the <a href="https://github.com/kedacore/http-add-on" rel="noopener">KEDA HTTP add-on</a> interceptor. Native HPA doesn't do that buffering; it only changes the replica count. For the async case, the native HPA is now all you need:</p>
+<pre><code><span class="k">apiVersion</span>: autoscaling/v2
+<span class="k">kind</span>: HorizontalPodAutoscaler
+<span class="k">metadata</span>: { <span class="k">name</span>: summariser-batch, <span class="k">namespace</span>: llm-serving }
+<span class="k">spec</span>:
+  <span class="k">scaleTargetRef</span>: { <span class="k">apiVersion</span>: apps/v1, <span class="k">kind</span>: Deployment, <span class="k">name</span>: summariser-batch }
+  <span class="k">minReplicas</span>: 0                          <span class="c"># allowed: at least one External metric below</span>
+  <span class="k">maxReplicas</span>: 6
+  <span class="k">metrics</span>:
+    - <span class="k">type</span>: External
+      <span class="k">external</span>:
+        <span class="k">metric</span>:
+          <span class="k">name</span>: summariser_queue_depth        <span class="c"># exposed by your metrics adapter from the queue</span>
+        <span class="k">target</span>:
+          <span class="k">type</span>: AverageValue                 <span class="c"># total / target = replicas, works from zero</span>
+          <span class="k">averageValue</span>: <span class="s">"50"</span>
+  <span class="k">behavior</span>:
+    <span class="k">scaleUp</span>:
+      <span class="k">stabilizationWindowSeconds</span>: 0
+      <span class="k">policies</span>: [{ <span class="k">type</span>: Pods, <span class="k">value</span>: 2, <span class="k">periodSeconds</span>: 60 }]
+    <span class="k">scaleDown</span>:
+      <span class="k">stabilizationWindowSeconds</span>: 1800       <span class="c"># a cold start costs minutes; don't flap</span>
+      <span class="k">policies</span>: [{ <span class="k">type</span>: Pods, <span class="k">value</span>: 1, <span class="k">periodSeconds</span>: 300 }]</code></pre>
+    <p>Use <code>AverageValue</code> rather than <code>Value</code> for this. With <code>AverageValue</code>, the HPA divides the total metric by the target to get a replica count, which works from zero. A <code>Value</code> target scales the current replica count by a ratio, which can't grow from nothing. And keep scale-down slow. I've run KEDA in production, and the habit carries over: a scale-down window shorter than the cost of a cold start just turns your autoscaler into a flapping, expensive restart loop.</p>
+
+    <h2 id="gang">7. Gang scheduling and multi-node models</h2>
+    <p>A model too large for one node, served with tensor and pipeline parallelism across several nodes, has a property ordinary Deployments don't: a partial replica is useless. If three of four pods schedule and the fourth waits for capacity, you've paid for three nodes' worth of GPUs to do nothing. Gang scheduling means all or nothing: place the whole group or none of it.</p>
+    <p>Kubernetes 1.37 moved the <code>Workload</code> and <code>PodGroup</code> APIs to beta at <code>scheduling.k8s.io/v1beta1</code>, with a gang policy and a <code>minCount</code>. But the <code>GenericWorkload</code> feature gate is off by default, and EKS doesn't let you turn on control plane gates. So on EKS today, native gang scheduling isn't available. The production route is what the ecosystem has used for a while:</p>
+    <ul>
+      <li><strong><a href="https://lws.sigs.k8s.io/" rel="noopener">LeaderWorkerSet</a></strong> to describe one replica as a leader pod plus N worker pods, created, scaled and restarted as a unit. vLLM's multi-node serving guides use it.</li>
+      <li><strong><a href="https://kueue.sigs.k8s.io/" rel="noopener">Kueue</a></strong> for admission: a replica group is only admitted when its whole quota fits, with topology-aware placement so the group lands close together, plus fair sharing between teams.</li>
+      <li><strong>Capacity you've actually reserved.</strong> For multi-node GPU replicas, Karpenter can't launch an instance type the region doesn't have spare. On-demand capacity reservations or capacity blocks are how teams make large GPU shapes predictable.</li>
+    </ul>
+    <p>Even upstream, the beta has limits worth knowing: the gang guarantee covers initial placement only, so after an eviction the group can fall below <code>minCount</code> while still running. Queues and quotas are still Kueue's job. When EKS turns the gate on, it'll make Kueue's life simpler, but it won't replace it.</p>
+
+    <h2 id="health">8. Device taints and sick GPUs</h2>
+    <p>GPUs fail in ways CPUs mostly don't: uncorrectable ECC errors, Xid errors, falling off the bus, thermal throttling. The classic symptom is a pod that starts fine, loads its model and then produces errors or garbage, while the node looks healthy to Kubernetes. Before DRA device taints, the only lever was cordoning the whole node, which on an 8-GPU instance throws away seven good GPUs to avoid one bad one.</p>
+    <p>With device taints at GA in 1.37, you can taint a single device. In practice, a health controller watches DCGM metrics and driver events and creates a <code>DeviceTaintRule</code> for the bad GPU:</p>
+<pre><code><span class="k">apiVersion</span>: resource.k8s.io/v1
+<span class="k">kind</span>: DeviceTaintRule
+<span class="k">metadata</span>:
+  <span class="k">name</span>: ip-10-0-12-34-gpu-3-ecc
+<span class="k">spec</span>:
+  <span class="k">deviceSelector</span>:
+    <span class="k">driver</span>: gpu.nvidia.com
+    <span class="k">pool</span>: ip-10-0-12-34.ap-south-1.compute.internal   <span class="c"># the node's ResourceSlice pool</span>
+    <span class="k">device</span>: gpu-3
+  <span class="k">taint</span>:
+    <span class="k">key</span>: platform.example.com/gpu-unhealthy
+    <span class="k">value</span>: ecc-uncorrectable
+    <span class="k">effect</span>: NoSchedule        <span class="c"># start here; NoExecute also evicts running pods</span></code></pre>
+    <p>Start with <code>NoSchedule</code> while you build trust in the detection, then move to <code>NoExecute</code> for the error classes you're sure about. Pair it with a node-level rule: if more than a set number of GPUs on one instance are tainted, drain and replace the node. With Karpenter, deleting the NodeClaim gets you a fresh instance. AWS's <a href="https://docs.aws.amazon.com/wellarchitected/latest/machine-learning-lens/machine-learning-lens.html" rel="noopener">Well-Architected Machine Learning Lens</a> makes the same point in more general terms: automate detecting and replacing unhealthy accelerators instead of relying on people to notice.</p>
+
+    <h2 id="upgrade">9. Upgrading GPU clusters to 1.37</h2>
+    <p>My main lesson from taking our EKS clusters from 1.33 to 1.36 is that the control plane is the easy part. EKS upgrades one minor version at a time, so you plan a sequence of hops, and the real work at each hop is everything installed on top: add-ons, controllers, CRDs and the workloads that depend on deprecated APIs. GPU clusters add a few more things to that list:</p>
+    <ul>
+      <li><strong>Driver, toolkit and DRA driver versions are a matrix.</strong> Check that your NVIDIA driver, container toolkit, DRA driver and Kubernetes version are supported together before you start. Upgrade them on a canary NodePool first.</li>
+      <li><strong>Karpenter's version decides what it understands.</strong> DRA awareness and new instance types arrive in Karpenter releases, so the Karpenter upgrade is part of the cluster upgrade.</li>
+      <li><strong>Node rotation means cold starts.</strong> Rolling a GPU NodePool restarts every model server. Do it with PodDisruptionBudgets, during low traffic, and with Karpenter disruption budgets so it rolls one node at a time.</li>
+      <li><strong>Check kube-proxy mode.</strong> IPVS is deprecated in 1.37. If any cluster still uses it, plan the move now rather than at the version that removes it.</li>
+      <li><strong>Metrics adapters and KEDA.</strong> Scale-to-zero depends on them, and so does your SLO alerting, so confirm their support for 1.37 before the hop.</li>
+    </ul>
+
+    <h2 id="failure">10. How inference platforms fail</h2>
+    <p>Most of these will look familiar from any platform. The GPU just makes each one more expensive.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Failure</th><th>What you see</th><th>Prevention</th></tr></thead>
+      <tbody>
+        <tr><td>Probe kills a loading model</td><td>Restart loop, pods never Ready, looks like a GPU fault</td><td>A startup probe sized to the worst-case load time</td></tr>
+        <tr><td>Scale-down flapping</td><td>Replicas cycle; users hit cold starts; the bill goes up instead of down</td><td>Long scale-down window, minimum warm replicas for interactive models</td></tr>
+        <tr><td>Round-robin hot spots</td><td>p99 time to first token spikes while average GPU use looks fine</td><td>InferencePool and endpoint picker; alert on queue depth per replica</td></tr>
+        <tr><td>No GPU capacity in the AZ</td><td>Pods pending for a long time, Karpenter errors about insufficient capacity</td><td>Several instance families and AZs in the NodePool, reservations for critical shapes</td></tr>
+        <tr><td>Silent bad GPU</td><td>One replica returns errors or slow tokens; the node reports healthy</td><td>DCGM health checks driving device taints; per-replica error rate alerts</td></tr>
+        <tr><td>Partial multi-node replica</td><td>GPUs allocated, no tokens served</td><td>LeaderWorkerSet with Kueue admission; never plain Deployments for multi-node</td></tr>
+        <tr><td>Noisy neighbour on a shared GPU</td><td>Latency for one model rises when another gets busy</td><td>MIG or whole GPUs for SLO workloads; time-slicing only for dev and batch</td></tr>
+        <tr><td>Image and weight sprawl</td><td>Slow node start, surprise storage cost, unscanned images</td><td>Pinned images mirrored to ECR with scan-on-push; weights versioned in S3</td></tr>
+      </tbody>
+    </table></div>
+    <p>The last row is one I care about because I've done the image side of it: at work we moved our images to ECR with scan-on-push, and the same discipline matters even more when a single serving image is 10 GB and runs on your most expensive nodes.</p>
+
+    <h2 id="plan">11. A rollout plan and checklist</h2>
+    <p>You don't need all of this on day one. This is the order I'd follow for a platform team taking on its first self-hosted models.</p>
+    <ol>
+      <li><strong>Weeks 1 to 2: one model, boring setup.</strong> A tainted GPU NodePool, the NVIDIA device plugin, one vLLM Deployment with whole GPUs, startup and readiness probes, and DCGM plus vLLM metrics in Prometheus. Measure the cold start step by step.</li>
+      <li><strong>Weeks 3 to 4: routing and SLOs.</strong> Put a Gateway API implementation with the Inference Extension in front, switch the route to an InferencePool, and define SLOs for time to first token and error rate, with burn-rate alerts like any other service.</li>
+      <li><strong>Weeks 5 to 6: cold start work.</strong> Driver in the AMI, cached images, weights streamed from S3. Re-measure. Only now decide which workloads can scale to zero.</li>
+      <li><strong>Weeks 7 to 8: DRA on a second NodePool.</strong> Enable DRA in Karpenter, install the DRA driver on a separate, labelled pool, and move dev and batch workloads first. Add device health and taints.</li>
+      <li><strong>Later: multi-node and sharing.</strong> LeaderWorkerSet and Kueue for anything that spans nodes, MIG where the hardware supports it, and a review of Karpenter's DRA status each quarter.</li>
+    </ol>
+    <p>And the checklist I'd use in a design review:</p>
+    <ol>
+      <li>GPU nodes are on their own tainted NodePool, with a CPU or cost ceiling in <code>limits</code>.</li>
+      <li>DRA and device plugin never manage the same GPUs; DRA pools are labelled and separate.</li>
+      <li>Every model server has a startup probe sized to its worst-case load time.</li>
+      <li>Routes target an InferencePool, and <code>failureMode</code> was chosen on purpose.</li>
+      <li>Rate limits and token budgets per tenant are enforced at the gateway.</li>
+      <li>Interactive models keep at least one warm replica per AZ; only queue-backed workloads scale to zero.</li>
+      <li>Scale-down windows are longer than a measured cold start.</li>
+      <li>Cold start is measured per step, and the driver, image and weights steps have been tuned.</li>
+      <li>Multi-node replicas use LeaderWorkerSet with Kueue admission, never plain Deployments.</li>
+      <li>DCGM health checks can taint a single GPU, and a node with too many tainted GPUs is replaced.</li>
+      <li>Serving images are pinned, mirrored to ECR and scanned; weights are versioned.</li>
+      <li>The upgrade plan covers drivers, the DRA driver, Karpenter and metrics adapters, not just the control plane.</li>
+    </ol>
+
+    <h2>The short version</h2>
+    <p>Kubernetes 1.37 makes GPU inference feel much more like the rest of the platform. Ask for GPUs with claims, keep sick devices out with taints, route with a picker that understands the model server, and scale to zero where a queue can absorb the wait. On EKS, be honest about what's still early: Karpenter's DRA support is alpha and native gang scheduling isn't switched on, so lean on the device plugin, LeaderWorkerSet and Kueue where it matters. Most of the work is the same platform discipline as always: dedicated pools, careful probes, slow scale-down, measured cold starts and an upgrade plan that covers everything above the control plane.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/peak-traffic-lessons-fifa-world-cup-2026/">Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills</a><span>A full playbook for a traffic spike on EKS: load tests that find the knee, KEDA and Karpenter pre-scaling, DR strategies and drills.</span></li>
+      <li><a href="/blog/agentic-developer-platform-golden-paths/">From IDP to agentic developer platform: golden paths as contracts agents can run</a><span>Golden paths as contracts AI agents can call: Backstage MCP actions, Crossplane XRDs, deterministic gates and Kargo promotions.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
