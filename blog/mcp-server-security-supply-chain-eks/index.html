@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MCP servers are supply chain: securing the agent tool layer on EKS | Arjun Kanojia</title>
+<meta name="description" content="How to run MCP servers on Amazon EKS like any other production dependency: what the 2026 MCP CVEs have in common, an MCP gateway with audience-bound tokens, signed and pinned images, egress allowlists, tool-definition drift detection, OPA policy, the OWASP MCP Top 10 mapped to controls and a CVE runbook.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="MCP servers are supply chain: securing the agent tool layer on EKS">
+<meta property="og:description" content="More than ten MCP CVEs in 2026, most of them old bug classes in a new place. A gateway with audience-bound tokens, signed images, egress allowlists, tool-hash pinning, OPA policy and a runbook for the next CVE.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/">
+<meta property="og:image" content="https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MCP servers are supply chain: securing the agent tool layer on EKS. Blog post by Arjun Kanojia.">
+<meta property="article:published_time" content="2026-11-09">
+<meta property="article:modified_time" content="2026-11-09">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/og.png">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<style>.prose .svgscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.prose .svgscroll svg{min-width:640px}</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "MCP servers are supply chain: securing the agent tool layer on EKS",
+  "description": "Running MCP servers on Amazon EKS as production dependencies: the 2026 MCP CVE patterns, an MCP gateway with audience-bound tokens, signed and pinned images, egress allowlists, tool-definition drift detection, OPA policy, the OWASP MCP Top 10 mapped to controls and a CVE runbook.",
+  "image": "https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/og.png",
+  "datePublished": "2026-11-09",
+  "dateModified": "2026-11-09",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/mcp-server-security-supply-chain-eks/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "MCP security, Model Context Protocol, MCP gateway, AI agents, supply chain security, Amazon EKS, Kubernetes, EKS Pod Identity, Kyverno, Sigstore, egress policy, OPA, OWASP MCP Top 10, platform engineering, DevSecOps"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">AI security · November 2026</span>
+    <h1>MCP servers are supply chain: securing the agent tool layer on EKS</h1>
+    <p class="dek">More than ten MCP CVEs have been published this year, and almost none of them are new kinds of bug. They're SSRF, injection, skipped authorization checks and tokens accepted by the wrong service, sitting in a layer most platform teams haven't inventoried yet. This is how I'd treat MCP servers on EKS: as dependencies with an owner, a pinned version, a narrow identity and a short leash on the network.</p>
+    <div class="meta"><time datetime="2026-11-09">9 November 2026</time> · 15 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#why">Why MCP is a supply chain problem</a></li>
+        <li><a href="#cves">What the 2026 CVEs have in common</a></li>
+        <li><a href="#arch">A gateway in front of every tool</a></li>
+        <li><a href="#identity">Tokens that mean one thing</a></li>
+        <li><a href="#images">Signed, pinned and boring images</a></li>
+        <li><a href="#egress">Egress is the blast radius</a></li>
+        <li><a href="#drift">Tool definitions drift, and that's an attack</a></li>
+        <li><a href="#models">Local, self-hosted or vendor-hosted</a></li>
+        <li><a href="#owasp">The OWASP MCP Top 10 as platform controls</a></li>
+        <li><a href="#runbook">Runbook: the day an MCP CVE drops</a></li>
+        <li><a href="#plan">A 30-day plan and checklist</a></li>
+      </ol>
+    </nav>
+
+    <p>A year ago, MCP servers were something a developer added to their IDE on a Friday afternoon. Now they sit between AI agents and real systems: Kubernetes clusters, cloud accounts, ticketing tools, Git hosting and databases. Every one of them is a piece of third-party code holding a credential, receiving input shaped by a language model, and making network calls on someone's behalf.</p>
+    <p>That's the definition of a supply chain dependency, and the 2026 vulnerability record treats it that way. Newly's <a href="https://newly.app/security/mcp-server-cve-roundup-2026" rel="noopener">2026 MCP server CVE roundup</a>, published on 26 October, counts more than ten flaws in MCP servers and tooling this year, including one in a Kubernetes MCP server scored 9.3 that could leak the operator's bearer token. The MCP Inspector project published nine advisories on 21 October alone. None of the roundup's entries have confirmed in-the-wild exploitation, which is exactly why now is the time to fix the platform side, before they do.</p>
+    <p>I use AI agents at work to write and maintain Terraform, and I spent part of this year moving our container images to ECR with scan-on-push and working through CISA KEV fixes. So I tend to look at MCP through those two lenses: what can the agent reach, and how do I know what code is running. This post is the design I'd propose for an EKS platform team.</p>
+
+    <h2 id="why">1. Why MCP is a supply chain problem</h2>
+    <p>The <a href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization" rel="noopener">Model Context Protocol</a> is a simple idea: a client (the agent or IDE) discovers tools on a server and calls them with JSON arguments. The simplicity is the point, and it's also why the risk is easy to underestimate. Three things make an MCP server different from an ordinary library:</p>
+    <ul>
+      <li><strong>It holds credentials the agent doesn't.</strong> The server is where the GitLab token, the kubeconfig or the AWS role lives. Compromise the server and you have the credential, not just the agent's session.</li>
+      <li><strong>Its input is attacker-influenced by design.</strong> Tool arguments are written by a model that has read issues, logs, web pages and documents. Any of those can carry instructions. So every argument is untrusted input, exactly like a form field on a public website.</li>
+      <li><strong>Its descriptions are part of the prompt.</strong> Tool names and descriptions go straight into the model's context. A server update that changes a description can change agent behaviour without changing a line of your code. That's the "tool poisoning" class in the <a href="https://owasp.org/projects/mcp-top-10" rel="noopener">OWASP MCP Top 10</a>.</li>
+    </ul>
+    <p>The industry already knows how to handle code like this. <a href="https://slsa.dev/" rel="noopener">SLSA</a> covers build provenance, <a href="https://csrc.nist.gov/pubs/sp/800/218/final" rel="noopener">NIST SP 800-218 (SSDF)</a> covers secure development and dependency practice, and the <a href="https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html" rel="noopener">AWS Well-Architected Security Pillar</a> covers least-privilege identity and network controls. The work is applying them to a layer that grew up outside the platform.</p>
+
+    <h2 id="cves">2. What the 2026 CVEs have in common</h2>
+    <p>Reading the roundup as a platform engineer rather than a security researcher, the useful exercise is to group the flaws by root cause and ask which platform control would have limited each one. Patching is necessary, but the next CVE will be in a server you haven't heard of yet. Controls are what carry over.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Bug class</th><th>2026 examples (from the roundup)</th><th>What it gives an attacker</th><th>Platform control that limits it</th></tr></thead>
+      <tbody>
+        <tr><td>SSRF and redirect following</td><td>mcp-atlassian (8.2) fetching attacker-chosen URLs including the cloud metadata address; Google mcp-toolbox following unlimited redirects; mcp-remote (9.1) fetching a URL from a server's auth challenge</td><td>Cloud credentials, internal services</td><td>Default-deny egress, IMDSv2 with hop limit 1, an egress proxy that blocks private ranges</td></tr>
+        <tr><td>Argument or command injection</td><td>mcp-server-kubernetes (9.3) letting arguments redirect kubectl to a hostile API server; AWS postgres MCP server running OS commands through <code>COPY ... TO PROGRAM</code></td><td>Code execution, the operator's token</td><td>Non-root, read-only containers; no shell tools in the image; egress allowlist so a redirected client can't reach the attacker</td></tr>
+        <tr><td>Authorization checked in the wrong place</td><td>mcp-server-kubernetes (8.8) checking access settings when listing tools but not when running them; DocumentDB MCP server allowing writes in read-only mode</td><td>Writes through a "read-only" tool</td><td>Least-privilege identity underneath the server: if the IAM role or RBAC can't write, the bug can't either</td></tr>
+        <tr><td>Token audience not validated</td><td>MCP TypeScript SDK (6.8, 20 October) accepting bearer tokens not issued for that server</td><td>Replaying a token from one server against another</td><td>Gateway-side audience checks and token exchange, so servers never see a user's raw token</td></tr>
+        <tr><td>Unsafe code generation</td><td>DynamoDB MCP server where crafted names in a data model could run code on the host deploying the generated CDK app</td><td>Code execution in CI</td><td>Generated code goes through review and policy gates like any other change</td></tr>
+      </tbody>
+    </table></div>
+    <p>Two patterns jump out. First, most of these are classic web bugs. The <a href="https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html" rel="noopener">OWASP SSRF cheat sheet</a> applies without changes. Second, the impact of nearly every one depends on what the server's identity and network allow. A server with a read-only role and no route to the internet turns a 9.x into an annoyance. That's where the platform team has the most leverage.</p>
+
+    <h2 id="arch">3. A gateway in front of every tool</h2>
+    <p>The pattern the industry is converging on is an MCP gateway: one place where agents connect, which authenticates them, decides which tools each one may call, applies policy to arguments, and writes an audit record. Open-source options include <a href="https://agentgateway.dev/" rel="noopener">agentgateway</a> (which runs on Kubernetes with kgateway), and several API gateways have added MCP support. Behind the gateway, servers run in their own namespace with their own identities.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 520" role="img" aria-label="Reference architecture for MCP on EKS. IDE assistants, an agent runtime and CI or platform agents all connect to a single MCP gateway. The gateway checks token audience and issuer, applies a per-agent tool allowlist, evaluates OPA policy on arguments, rate limits, and writes an audit record. A registry of approved servers, image digests and tool definition hashes feeds the gateway. Behind it, inside an EKS namespace called mcp-servers with default-deny egress and signed images only, run three servers: a CloudWatch server with a read-only role through EKS Pod Identity, a Kubernetes server bound to a read-only view role, and a GitLab server with a scoped token from Secrets Manager. Each server can reach only its own upstream API: AWS APIs, the Kubernetes API, or the GitLab API. Supporting services are an OpenTelemetry collector sending audit spans to a SIEM, and ECR with scan-on-push and signed digests." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="20" y="10" width="200" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="120" y="35" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">IDE assistants</text>
+        <rect x="250" y="10" width="200" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="350" y="35" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Agent runtime</text>
+        <rect x="480" y="10" width="200" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="580" y="35" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">CI and platform agents</text>
+        <line x1="120" y1="50" x2="180" y2="82" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="350" y1="50" x2="350" y2="82" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="580" y1="50" x2="490" y2="82" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <rect x="20" y="84" width="540" height="64" rx="10" fill="#0E131A" stroke="#3EE6C4"/>
+        <text x="290" y="108" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">MCP gateway</text>
+        <text x="290" y="127" text-anchor="middle" fill="#8B97A6" font-size="11">audience + issuer check · per-agent tool allowlist · OPA on arguments</text>
+        <text x="290" y="142" text-anchor="middle" fill="#8B97A6" font-size="11">rate limits · token exchange · one audit span per tool call</text>
+        <rect x="586" y="84" width="154" height="64" rx="10" fill="#131A23" stroke="#FF9E6D"/>
+        <text x="663" y="104" text-anchor="middle" fill="#FF9E6D" font-size="12" font-weight="600">Registry</text>
+        <text x="663" y="121" text-anchor="middle" fill="#8B97A6" font-size="10.5">approved servers</text>
+        <text x="663" y="136" text-anchor="middle" fill="#8B97A6" font-size="10.5">digests · tool hashes</text>
+        <line x1="586" y1="116" x2="564" y2="116" stroke="#FF9E6D" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#m1)"/>
+        <line x1="120" y1="148" x2="120" y2="196" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="290" y1="148" x2="370" y2="196" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="460" y1="148" x2="600" y2="196" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <rect x="20" y="176" width="720" height="176" rx="14" fill="none" stroke="#3EE6C4"/>
+        <rect x="36" y="198" width="196" height="104" rx="10" fill="#131A23" stroke="#2A3848"/>
+        <text x="134" y="221" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">CloudWatch MCP</text>
+        <text x="134" y="242" text-anchor="middle" fill="#7CA7FF" font-size="11">EKS Pod Identity</text>
+        <text x="134" y="259" text-anchor="middle" fill="#8B97A6" font-size="10.5">read-only logs + metrics role</text>
+        <text x="134" y="284" text-anchor="middle" fill="#8B97A6" font-size="10.5">2 replicas · non-root</text>
+        <rect x="282" y="198" width="196" height="104" rx="10" fill="#131A23" stroke="#2A3848"/>
+        <text x="380" y="221" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">Kubernetes MCP</text>
+        <text x="380" y="242" text-anchor="middle" fill="#7CA7FF" font-size="11">ServiceAccount</text>
+        <text x="380" y="259" text-anchor="middle" fill="#8B97A6" font-size="10.5">bound to the view ClusterRole</text>
+        <text x="380" y="284" text-anchor="middle" fill="#8B97A6" font-size="10.5">no secrets, no exec</text>
+        <rect x="528" y="198" width="196" height="104" rx="10" fill="#131A23" stroke="#2A3848"/>
+        <text x="626" y="221" text-anchor="middle" fill="#E9EEF4" font-size="12.5" font-weight="600">GitLab MCP</text>
+        <text x="626" y="242" text-anchor="middle" fill="#7CA7FF" font-size="11">scoped project token</text>
+        <text x="626" y="259" text-anchor="middle" fill="#8B97A6" font-size="10.5">from Secrets Manager</text>
+        <text x="626" y="284" text-anchor="middle" fill="#8B97A6" font-size="10.5">read_api only</text>
+        <text x="36" y="336" fill="#3EE6C4" font-size="11" font-weight="600">EKS · NAMESPACE mcp-servers · DEFAULT-DENY EGRESS · SIGNED IMAGES ONLY</text>
+        <line x1="134" y1="302" x2="134" y2="388" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="380" y1="302" x2="380" y2="388" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <line x1="626" y1="302" x2="626" y2="388" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m1)"/>
+        <text x="142" y="372" fill="#8B97A6" font-size="10">allowlisted egress</text>
+        <text x="388" y="372" fill="#8B97A6" font-size="10">allowlisted egress</text>
+        <text x="634" y="372" fill="#8B97A6" font-size="10">allowlisted egress</text>
+        <rect x="36" y="390" width="196" height="38" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="134" y="414" text-anchor="middle" fill="#7CA7FF" font-size="12">AWS APIs</text>
+        <rect x="282" y="390" width="196" height="38" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="380" y="414" text-anchor="middle" fill="#7CA7FF" font-size="12">Kubernetes API</text>
+        <rect x="528" y="390" width="196" height="38" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="626" y="414" text-anchor="middle" fill="#7CA7FF" font-size="12">GitLab API</text>
+        <rect x="20" y="456" width="350" height="48" rx="10" fill="#0E131A" stroke="#2A3848" stroke-dasharray="5 4"/>
+        <text x="195" y="476" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">OpenTelemetry Collector → SIEM</text>
+        <text x="195" y="493" text-anchor="middle" fill="#8B97A6" font-size="10.5">audit spans from the gateway and servers</text>
+        <rect x="390" y="456" width="350" height="48" rx="10" fill="#0E131A" stroke="#2A3848" stroke-dasharray="5 4"/>
+        <text x="565" y="476" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">ECR</text>
+        <text x="565" y="493" text-anchor="middle" fill="#8B97A6" font-size="10.5">mirrored images · scan-on-push · signed digests</text>
+      </svg>
+      </div>
+      <figcaption>Fig 1. One gateway, many narrow servers. The gateway decides who may call what; each server's identity and network decide how bad a bug in it can get.</figcaption>
+    </figure>
+
+    <p>The design choices that matter:</p>
+    <ul>
+      <li><strong>One server per upstream system, one identity per server.</strong> A "do everything" server with an admin token is the MCP version of running every microservice as root. Small servers with narrow roles keep each CVE's blast radius small.</li>
+      <li><strong>Agents never talk to servers directly.</strong> NetworkPolicy allows ingress to the <code>mcp-servers</code> namespace only from the gateway. That gives you one place for authentication, policy and audit, and one place to switch a server off.</li>
+      <li><strong>The registry is the source of truth.</strong> Which servers are approved, at which image digest, exposing which tools with which definition hashes. The gateway enforces it; a merge request changes it.</li>
+    </ul>
+
+    <h2 id="identity">4. Tokens that mean one thing</h2>
+    <p>The current MCP specification (version <code>2026-07-28</code>) is clear about tokens, and most of the authorization bugs this year come from ignoring it. An HTTP MCP server acts as an OAuth 2.1 resource server. Clients must send a <code>resource</code> parameter (<a href="https://www.rfc-editor.org/rfc/rfc8707.html" rel="noopener">RFC 8707</a>) naming the server they want a token for. Servers must validate that the token was issued for them, and the spec says servers "MUST NOT accept or transit any other tokens". The <a href="https://modelcontextprotocol.io/specification/latest/basic/security_best_practices" rel="noopener">security best practices page</a> calls forwarding a client's token downstream "token passthrough" and forbids it. The 2026-07-28 revision also deprecated Dynamic Client Registration in favour of Client ID Metadata Documents, and made the protocol stateless, so servers shouldn't treat a state handle as proof of identity.</p>
+    <p>In platform terms, that means three different credentials in one tool call, each with exactly one audience:</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 470" role="img" aria-label="Sequence of one MCP tool call with identity checks. One: the agent asks the identity provider for a token with resource set to the gateway's CloudWatch route. Two: the identity provider returns an access token whose audience is that route. Three: the agent sends tools/call query_logs to the gateway with the bearer token. Four: the gateway verifies audience and issuer, checks the tool is on this agent's allowlist, checks the tool's definition hash matches the registry, and evaluates OPA policy on the arguments. Five: the gateway forwards the call with a new internal token whose audience is the CloudWatch server, not the user's token. Six: the MCP server validates that token's audience and uses its own Pod Identity role. Seven: the server calls the AWS API with a SigV4 request using a read-only role. Eight: the result returns to the server and then the gateway, which writes an audit span and returns the result to the agent. A note says a token with the wrong audience gets a 401 at the first check that sees it." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker><marker id="m2t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3EE6C4"/></marker></defs>
+        <rect x="20" y="10" width="110" height="36" rx="8" fill="#131A23" stroke="#2A3848"/><text x="75" y="33" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Agent</text>
+        <rect x="170" y="10" width="110" height="36" rx="8" fill="#131A23" stroke="#2A3848"/><text x="225" y="33" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">Identity provider</text>
+        <rect x="320" y="10" width="120" height="36" rx="8" fill="#0E131A" stroke="#3EE6C4"/><text x="380" y="33" text-anchor="middle" fill="#3EE6C4" font-size="12" font-weight="600">MCP gateway</text>
+        <rect x="480" y="10" width="120" height="36" rx="8" fill="#131A23" stroke="#2A3848"/><text x="540" y="33" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">CloudWatch MCP</text>
+        <rect x="640" y="10" width="100" height="36" rx="8" fill="#131A23" stroke="#7CA7FF"/><text x="690" y="33" text-anchor="middle" fill="#7CA7FF" font-size="12" font-weight="600">AWS API</text>
+        <g stroke="#2A3848" stroke-dasharray="3 4"><line x1="75" y1="46" x2="75" y2="440"/><line x1="225" y1="46" x2="225" y2="440"/><line x1="380" y1="46" x2="380" y2="440"/><line x1="540" y1="46" x2="540" y2="440"/><line x1="690" y1="46" x2="690" y2="440"/></g>
+        <line x1="75" y1="78" x2="221" y2="78" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m2)"/><text x="150" y="70" text-anchor="middle" fill="#E9EEF4" font-size="10.5">1 token request, resource=gw/cloudwatch</text>
+        <line x1="225" y1="106" x2="79" y2="106" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#m2)"/><text x="150" y="99" text-anchor="middle" fill="#8B97A6" font-size="10.5">2 access token, aud=gw/cloudwatch</text>
+        <line x1="75" y1="140" x2="376" y2="140" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m2)"/><text x="300" y="132" text-anchor="middle" fill="#E9EEF4" font-size="10.5">3 tools/call query_logs + Bearer</text>
+        <rect x="300" y="154" width="160" height="80" rx="8" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="380" y="172" text-anchor="middle" fill="#3EE6C4" font-size="10.5" font-weight="600">4 gateway checks</text>
+        <text x="380" y="189" text-anchor="middle" fill="#8B97A6" font-size="10">aud + iss valid</text>
+        <text x="380" y="204" text-anchor="middle" fill="#8B97A6" font-size="10">tool on agent allowlist</text>
+        <text x="380" y="219" text-anchor="middle" fill="#8B97A6" font-size="10">tool hash pinned · OPA args</text>
+        <line x1="380" y1="262" x2="536" y2="262" stroke="#3EE6C4" stroke-width="1.5" marker-end="url(#m2t)"/><text x="458" y="254" text-anchor="middle" fill="#3EE6C4" font-size="10.5">5 new token, aud=cloudwatch-mcp</text>
+        <rect x="560" y="246" width="70" height="46" rx="8" fill="#131A23" stroke="#2A3848"/>
+        <text x="595" y="265" text-anchor="middle" fill="#E9EEF4" font-size="9.5">6 check aud</text>
+        <text x="595" y="280" text-anchor="middle" fill="#8B97A6" font-size="9.5">own role</text>
+        <line x1="540" y1="318" x2="686" y2="318" stroke="#7CA7FF" stroke-width="1.5" marker-end="url(#m2)"/><text x="615" y="310" text-anchor="middle" fill="#7CA7FF" font-size="10.5">7 SigV4, read-only role</text>
+        <line x1="690" y1="346" x2="544" y2="346" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#m2)"/><text x="615" y="339" text-anchor="middle" fill="#8B97A6" font-size="10.5">log results</text>
+        <line x1="540" y1="370" x2="384" y2="370" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#m2)"/><text x="460" y="363" text-anchor="middle" fill="#8B97A6" font-size="10.5">tool result</text>
+        <line x1="380" y1="398" x2="79" y2="398" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#m2)"/><text x="228" y="391" text-anchor="middle" fill="#8B97A6" font-size="10.5">8 result · audit span written</text>
+        <text x="380" y="460" text-anchor="middle" fill="#FF9E6D" font-size="11">A token with the wrong audience gets a 401 at the first check that sees it. Nothing is forwarded as-is.</text>
+      </svg>
+      </div>
+      <figcaption>Fig 2. One tool call, three credentials: the agent's token (audience: the gateway route), an internal token (audience: one server), and the server's own cloud role. None of them is valid anywhere else.</figcaption>
+    </figure>
+
+    <p>The server's cloud identity is the layer platform teams own outright, and it's where I'd spend effort first, because it caps the damage from every authorization bug in section 2. On EKS, <a href="https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html" rel="noopener">EKS Pod Identity</a> gives each server's ServiceAccount its own IAM role without node-level credentials. Here's a read-only CloudWatch role in Terraform:</p>
+<pre><code><span class="c"># One role per MCP server. Pod Identity adds session tags (namespace, service account, cluster).</span>
+<span class="k">resource</span> <span class="s">"aws_iam_role"</span> <span class="s">"mcp_cloudwatch_ro"</span> {
+  <span class="k">name</span> = <span class="s">"mcp-cloudwatch-readonly"</span>
+  <span class="k">assume_role_policy</span> = jsonencode({
+    <span class="k">Version</span> = <span class="s">"2012-10-17"</span>
+    <span class="k">Statement</span> = [{
+      <span class="k">Effect</span>    = <span class="s">"Allow"</span>
+      <span class="k">Principal</span> = { <span class="k">Service</span> = <span class="s">"pods.eks.amazonaws.com"</span> }
+      <span class="k">Action</span>    = [<span class="s">"sts:AssumeRole"</span>, <span class="s">"sts:TagSession"</span>]
+    }]
+  })
+}
+
+<span class="k">resource</span> <span class="s">"aws_iam_role_policy"</span> <span class="s">"mcp_cloudwatch_ro"</span> {
+  <span class="k">role</span> = aws_iam_role.mcp_cloudwatch_ro.id
+  <span class="k">policy</span> = jsonencode({
+    <span class="k">Version</span> = <span class="s">"2012-10-17"</span>
+    <span class="k">Statement</span> = [
+      {
+        <span class="k">Sid</span>      = <span class="s">"QueryAppLogsOnly"</span>
+        <span class="k">Effect</span>   = <span class="s">"Allow"</span>
+        <span class="k">Action</span>   = [<span class="s">"logs:StartQuery"</span>, <span class="s">"logs:FilterLogEvents"</span>, <span class="s">"logs:DescribeLogStreams"</span>]
+        <span class="k">Resource</span> = <span class="s">"arn:aws:logs:ap-south-1:123456789012:log-group:/app/*"</span>   <span class="c"># not audit or security log groups</span>
+      },
+      {
+        <span class="k">Sid</span>      = <span class="s">"ReadQueryResultsAndMetrics"</span>
+        <span class="k">Effect</span>   = <span class="s">"Allow"</span>
+        <span class="k">Action</span>   = [<span class="s">"logs:GetQueryResults"</span>, <span class="s">"cloudwatch:GetMetricData"</span>, <span class="s">"cloudwatch:ListMetrics"</span>]
+        <span class="k">Resource</span> = <span class="s">"*"</span>                                   <span class="c"># these actions don't support resource scoping</span>
+      }
+    ]
+  })
+}
+
+<span class="k">resource</span> <span class="s">"aws_eks_pod_identity_association"</span> <span class="s">"mcp_cloudwatch_ro"</span> {
+  <span class="k">cluster_name</span>    = var.cluster_name
+  <span class="k">namespace</span>       = <span class="s">"mcp-servers"</span>
+  <span class="k">service_account</span> = <span class="s">"mcp-cloudwatch"</span>
+  <span class="k">role_arn</span>        = aws_iam_role.mcp_cloudwatch_ro.arn
+}</code></pre>
+    <p>Two habits make this hold up over time. Keep the role scoped to the log groups the server actually needs, so a prompt-injected "show me the CloudTrail logs" fails at IAM rather than relying on the model to behave. And manage these roles in the same Terraform modules, with the same drift detection, as the rest of the platform. An MCP role created by hand in the console is the one nobody reviews.</p>
+
+    <h2 id="images">5. Signed, pinned and boring images</h2>
+    <p>Most MCP servers are distributed as npm or PyPI packages and started with <code>npx</code> or <code>uvx</code>. That's convenient on a laptop and a problem in a cluster: the version is resolved at start-up, the package's install scripts run with the server's privileges, and two replicas can end up running different code. The fix is the same thing we did for application images: build once in CI, pin dependencies with a lockfile, produce an SBOM, sign the image, push it to your own ECR with scan-on-push, and deploy by digest.</p>
+    <p>Admission control then makes it a rule instead of a habit. With <a href="https://kyverno.io/docs/writing-policies/verify-images/" rel="noopener">Kyverno's image verification</a>, pods in the MCP namespace only start if the image is signed by your CI pipeline, and tags get rewritten to digests:</p>
+<pre><code><span class="k">apiVersion</span>: kyverno.io/v1
+<span class="k">kind</span>: ClusterPolicy
+<span class="k">metadata</span>:
+  <span class="k">name</span>: mcp-servers-signed-images
+<span class="k">spec</span>:
+  <span class="k">webhookTimeoutSeconds</span>: 30
+  <span class="k">rules</span>:
+    - <span class="k">name</span>: verify-ci-signature
+      <span class="k">match</span>:
+        <span class="k">any</span>:
+          - <span class="k">resources</span>:
+              <span class="k">kinds</span>: [Pod]
+              <span class="k">namespaces</span>: [mcp-servers]
+      <span class="k">verifyImages</span>:
+        - <span class="k">imageReferences</span>:
+            - <span class="s">"123456789012.dkr.ecr.ap-south-1.amazonaws.com/mcp/*"</span>
+          <span class="k">failureAction</span>: Enforce
+          <span class="k">mutateDigest</span>: true          <span class="c"># tag in, digest out</span>
+          <span class="k">verifyDigest</span>: true
+          <span class="k">required</span>: true
+          <span class="k">attestors</span>:
+            - <span class="k">entries</span>:
+                - <span class="k">keyless</span>:            <span class="c"># Sigstore keyless signature from the CI job's OIDC identity</span>
+                    <span class="k">issuer</span>: <span class="s">"https://gitlab.example.com"</span>
+                    <span class="k">subject</span>: <span class="s">"https://gitlab.example.com/platform/mcp-servers//.gitlab-ci.yml@refs/heads/main"</span>
+                    <span class="k">rekor</span>:
+                      <span class="k">url</span>: https://rekor.sigstore.dev</code></pre>
+    <p>If you'd rather stay AWS-native, AWS Signer with Notation does the same job, and the Kyverno policy changes to a Notary attestor. Either way, the policy also needs an exception path for emergencies, documented and audited, or someone will turn the policy off at 2 AM.</p>
+    <p>The workload itself should look like the most locked-down service you run, because it's handling attacker-shaped input with a credential:</p>
+<pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>: { <span class="k">name</span>: mcp-cloudwatch, <span class="k">namespace</span>: mcp-servers }
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 2
+  <span class="k">selector</span>: { <span class="k">matchLabels</span>: { <span class="k">app</span>: mcp-cloudwatch } }
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>: { <span class="k">app</span>: mcp-cloudwatch, <span class="k">mcp.example.com/tier</span>: read-only }
+    <span class="k">spec</span>:
+      <span class="k">serviceAccountName</span>: mcp-cloudwatch
+      <span class="k">automountServiceAccountToken</span>: false   <span class="c"># no Kubernetes API access; Pod Identity mounts its own token</span>
+      <span class="k">securityContext</span>:
+        <span class="k">runAsNonRoot</span>: true
+        <span class="k">seccompProfile</span>: { <span class="k">type</span>: RuntimeDefault }
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: server
+          <span class="k">image</span>: 123456789012.dkr.ecr.ap-south-1.amazonaws.com/mcp/cloudwatch:1.4.2   <span class="c"># rewritten to @sha256 by Kyverno</span>
+          <span class="k">ports</span>: [{ <span class="k">containerPort</span>: 8080, <span class="k">name</span>: mcp }]
+          <span class="k">securityContext</span>:
+            <span class="k">allowPrivilegeEscalation</span>: false
+            <span class="k">readOnlyRootFilesystem</span>: true
+            <span class="k">capabilities</span>: { <span class="k">drop</span>: [<span class="s">"ALL"</span>] }
+          <span class="k">resources</span>:
+            <span class="k">requests</span>: { <span class="k">cpu</span>: 100m, <span class="k">memory</span>: 256Mi }
+            <span class="k">limits</span>: { <span class="k">memory</span>: 512Mi }
+          <span class="k">volumeMounts</span>: [{ <span class="k">name</span>: tmp, <span class="k">mountPath</span>: /tmp }]
+      <span class="k">volumes</span>: [{ <span class="k">name</span>: tmp, <span class="k">emptyDir</span>: { <span class="k">sizeLimit</span>: 64Mi } }]</code></pre>
+    <p>Notice what's missing: no shell-heavy base image, no writable root, no capabilities and no Kubernetes token. The postgres <code>COPY ... TO PROGRAM</code> bug from the roundup is a reminder that "run an OS command" can hide inside a database feature, so the container should have as little as possible to run.</p>
+
+    <h2 id="egress">6. Egress is the blast radius</h2>
+    <p>Look back at the SSRF and injection rows in the CVE table. In every case the attacker needs the server to reach somewhere it shouldn't: the instance metadata endpoint, an internal service, or a hostile API server. Default-deny egress turns those from credential theft into a failed connection and a log line.</p>
+    <p>Start with the cheap wins on EKS. Require IMDSv2 with a hop limit of 1 on your node groups and Karpenter EC2NodeClasses, so pods can't reach the node's metadata credentials at all. Then deny egress by default in the <code>mcp-servers</code> namespace. The Amazon VPC CNI enforces standard Kubernetes NetworkPolicy, which works with IPs and CIDRs. Most MCP servers talk to SaaS APIs by hostname, though, so FQDN rules are far easier to keep correct. With Cilium that looks like this:</p>
+<pre><code><span class="k">apiVersion</span>: cilium.io/v2
+<span class="k">kind</span>: CiliumNetworkPolicy
+<span class="k">metadata</span>:
+  <span class="k">name</span>: mcp-gitlab-egress
+  <span class="k">namespace</span>: mcp-servers
+<span class="k">spec</span>:
+  <span class="k">endpointSelector</span>:
+    <span class="k">matchLabels</span>: { <span class="k">app</span>: mcp-gitlab }
+  <span class="k">egress</span>:
+    - <span class="k">toEndpoints</span>:                      <span class="c"># DNS, inspected so toFQDNs can learn the IPs</span>
+        - <span class="k">matchLabels</span>:
+            <span class="s">"k8s:io.kubernetes.pod.namespace"</span>: kube-system
+            <span class="s">"k8s:k8s-app"</span>: kube-dns
+      <span class="k">toPorts</span>:
+        - <span class="k">ports</span>: [{ <span class="k">port</span>: <span class="s">"53"</span>, <span class="k">protocol</span>: ANY }]
+          <span class="k">rules</span>:
+            <span class="k">dns</span>: [{ <span class="k">matchPattern</span>: <span class="s">"*"</span> }]
+    - <span class="k">toFQDNs</span>:                          <span class="c"># the one upstream this server exists for</span>
+        - <span class="k">matchName</span>: gitlab.example.com
+      <span class="k">toPorts</span>:
+        - <span class="k">ports</span>: [{ <span class="k">port</span>: <span class="s">"443"</span>, <span class="k">protocol</span>: TCP }]
+<span class="c"># Anything not listed is dropped: no metadata endpoint, no cluster services, no internet.</span></code></pre>
+    <p>If you're staying on the VPC CNI only, the common alternative is an egress proxy that enforces a hostname allowlist and blocks private ranges. Stripe's <a href="https://github.com/stripe/smokescreen" rel="noopener">Smokescreen</a> is the example the MCP security page itself points to. Also deny ingress to the namespace from everything except the gateway, so a compromised agent pod elsewhere in the cluster can't call servers directly.</p>
+    <p class="callout">A useful test for every MCP server: if its process were fully compromised right now, what's the worst thing its role and its network policy would let an attacker do? If the answer is longer than one sentence, the server is too powerful.</p>
+
+    <h2 id="drift">7. Tool definitions drift, and that's an attack</h2>
+    <p>Image signing proves which code is running. It doesn't tell you that the tool called <code>search_issues</code> still has the description you reviewed. Some servers build tool lists dynamically, and a version bump can change descriptions, add parameters, or add a new tool entirely. Since descriptions go straight into the model's context, a changed description is a changed prompt. This is how the "rug pull" pattern works: a server behaves well at review time and changes later.</p>
+    <p>The control is the same idea as a lockfile. When a server is approved, record a hash of each tool's name, description, input schema and annotations. Then check the live definitions against it at deploy time and on a schedule, and have the gateway refuse calls to any tool whose hash doesn't match:</p>
+<pre><code><span class="c"># mcp_tool_lock.py: compare live tool definitions with the approved lock file</span>
+<span class="k">import</span> hashlib, json, sys
+
+FIELDS = (<span class="s">"name"</span>, <span class="s">"title"</span>, <span class="s">"description"</span>, <span class="s">"inputSchema"</span>, <span class="s">"outputSchema"</span>, <span class="s">"annotations"</span>)
+
+<span class="k">def</span> fingerprint(tool: dict) -&gt; str:
+    <span class="c"># Hash exactly what the model reads, in a canonical form</span>
+    material = {k: tool.get(k) <span class="k">for</span> k <span class="k">in</span> FIELDS}
+    canonical = json.dumps(material, sort_keys=True, separators=(<span class="s">","</span>, <span class="s">":"</span>), ensure_ascii=False)
+    <span class="k">return</span> hashlib.sha256(canonical.encode(<span class="s">"utf-8"</span>)).hexdigest()
+
+<span class="k">def</span> main(lock_path: str, live_path: str) -&gt; int:
+    <span class="k">with</span> open(lock_path) <span class="k">as</span> f:
+        lock = json.load(f)                                  <span class="c"># {"tool_name": "sha256", ...}</span>
+    <span class="k">with</span> open(live_path) <span class="k">as</span> f:
+        live = {t[<span class="s">"name"</span>]: fingerprint(t) <span class="k">for</span> t <span class="k">in</span> json.load(f)[<span class="s">"tools"</span>]}   <span class="c"># a tools/list result</span>
+
+    added = sorted(live.keys() - lock.keys())
+    removed = sorted(lock.keys() - live.keys())
+    changed = sorted(n <span class="k">for</span> n <span class="k">in</span> live.keys() &amp; lock.keys() <span class="k">if</span> live[n] != lock[n])
+
+    <span class="k">for</span> label, names <span class="k">in</span> ((<span class="s">"ADDED"</span>, added), (<span class="s">"REMOVED"</span>, removed), (<span class="s">"CHANGED"</span>, changed)):
+        <span class="k">for</span> name <span class="k">in</span> names:
+            print(f<span class="s">"{label}: {name}"</span>)
+    <span class="k">return</span> 1 <span class="k">if</span> (added <span class="k">or</span> changed) <span class="k">else</span> 0                  <span class="c"># fail CI; a human re-reviews and updates the lock</span>
+
+<span class="k">if</span> __name__ == <span class="s">"__main__"</span>:
+    sys.exit(main(sys.argv[1], sys.argv[2]))</code></pre>
+    <p>The gateway then applies policy per call. Here's the shape of it in OPA's Rego: an agent may call a tool only if the registry lists it for that agent, the definition hash matches, and anything marked destructive has an approval. Note that the <code>destructiveHint</code> comes from the registry, where a human reviewed it, not from the server. MCP tool annotations are hints written by the server author, and a malicious server can simply claim everything is read-only.</p>
+<pre><code><span class="k">package</span> mcp.authz
+
+<span class="k">import</span> rego.v1
+
+<span class="k">default</span> allow := false
+
+tool := data.registry.servers[input.tool.server].tools[input.tool.name]
+
+known_tool <span class="k">if</span> {
+    input.tool.name <span class="k">in</span> data.registry.agents[input.agent.id].allowed_tools
+    input.tool.definition_sha256 == tool.sha256          <span class="c"># pinned at review time</span>
+}
+
+destructive <span class="k">if</span> tool.reviewed.destructive                  <span class="c"># reviewed by a human, not the server's own hint</span>
+
+allow <span class="k">if</span> {
+    known_tool
+    <span class="k">not</span> destructive
+}
+
+allow <span class="k">if</span> {
+    known_tool
+    destructive
+    input.approval.status == <span class="s">"approved"</span>
+    input.approval.approver != input.agent.owner         <span class="c"># no self-approval</span>
+}</code></pre>
+    <p>The audit side completes the loop. The <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" rel="noopener">OpenTelemetry GenAI semantic conventions</a> include attributes for agent and tool spans, such as <code>gen_ai.agent.name</code> and <code>gen_ai.tool.name</code>, so the gateway can emit one span per tool call with the agent identity, tool, decision and latency, and you can query it alongside the rest of your traces. OWASP lists "lack of audit and telemetry" as its own MCP risk for a reason: after an incident, the first question is always "what did the agent actually call?"</p>
+
+    <h2 id="models">8. Local, self-hosted or vendor-hosted</h2>
+    <p>Not every MCP server belongs in the cluster. The spec itself distinguishes STDIO servers, which run as a local process and take credentials from the environment, from HTTP servers that use OAuth. The question I'd ask first is whose credentials the server uses, because that decides where it can safely run.</p>
+
+    <figure>
+      <div class="svgscroll">
+      <svg viewBox="0 0 760 380" role="img" aria-label="Decision tree for where an MCP server should run. First question: whose credentials does it use? If only the developer's own, such as local files or a local Git checkout, run it locally over STDIO in a sandbox such as a container or devcontainer, at a pinned version, with no shared credentials. If it uses shared or service credentials, ask who runs the server. If your team runs it, self-host it on EKS behind the gateway with a signed image, Pod Identity and an egress allowlist. If a vendor runs it as a remote server, allow it only through the gateway, using OAuth with resource indicators, reviewed scopes and a data classification check. A footer says never to put shared credentials in a local STDIO config file on laptops." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="230" y="14" width="300" height="44" rx="10" fill="#0E131A" stroke="#3EE6C4"/><text x="380" y="41" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">Whose credentials does it use?</text>
+        <line x1="300" y1="58" x2="160" y2="118" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/><text x="172" y="84" fill="#8B97A6" font-size="11">only the developer's own</text>
+        <line x1="460" y1="58" x2="560" y2="118" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/><text x="522" y="84" fill="#8B97A6" font-size="11">shared or service</text>
+        <rect x="20" y="120" width="260" height="96" rx="10" fill="#131A23" stroke="#FF9E6D"/>
+        <text x="150" y="144" text-anchor="middle" fill="#FF9E6D" font-size="12.5" font-weight="600">Local STDIO, sandboxed</text>
+        <text x="150" y="165" text-anchor="middle" fill="#8B97A6" font-size="10.5">container or devcontainer</text>
+        <text x="150" y="181" text-anchor="middle" fill="#8B97A6" font-size="10.5">pinned version from an allowlist</text>
+        <text x="150" y="197" text-anchor="middle" fill="#8B97A6" font-size="10.5">e.g. local files, local Git</text>
+        <rect x="420" y="120" width="300" height="44" rx="10" fill="#131A23" stroke="#7CA7FF"/><text x="570" y="147" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">Who runs the server?</text>
+        <line x1="510" y1="164" x2="450" y2="232" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/><text x="452" y="202" fill="#8B97A6" font-size="11">we do</text>
+        <line x1="630" y1="164" x2="660" y2="232" stroke="#5D6977" stroke-width="1.5" marker-end="url(#m3)"/><text x="654" y="202" fill="#8B97A6" font-size="11">a vendor</text>
+        <rect x="320" y="234" width="210" height="96" rx="10" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="425" y="258" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">Self-hosted on EKS</text>
+        <text x="425" y="279" text-anchor="middle" fill="#8B97A6" font-size="10.5">behind the gateway</text>
+        <text x="425" y="295" text-anchor="middle" fill="#8B97A6" font-size="10.5">signed image · Pod Identity</text>
+        <text x="425" y="311" text-anchor="middle" fill="#8B97A6" font-size="10.5">egress allowlist</text>
+        <rect x="550" y="234" width="190" height="96" rx="10" fill="#131A23" stroke="#3EE6C4"/>
+        <text x="645" y="258" text-anchor="middle" fill="#3EE6C4" font-size="12.5" font-weight="600">Vendor remote</text>
+        <text x="645" y="279" text-anchor="middle" fill="#8B97A6" font-size="10.5">via the gateway only</text>
+        <text x="645" y="295" text-anchor="middle" fill="#8B97A6" font-size="10.5">OAuth + resource indicators</text>
+        <text x="645" y="311" text-anchor="middle" fill="#8B97A6" font-size="10.5">scopes and data reviewed</text>
+        <line x1="20" y1="350" x2="740" y2="350" stroke="#2A3848"/>
+        <text x="380" y="372" text-anchor="middle" fill="#E9EEF4" font-size="12">Never: shared or production credentials in a local STDIO config file on laptops</text>
+      </svg>
+      </div>
+      <figcaption>Fig 3. Choosing a deployment model. Credentials decide first; who operates the server decides the rest.</figcaption>
+    </figure>
+
+    <div class="tbl"><table>
+      <thead><tr><th>Model</th><th>Who patches it</th><th>Credential location</th><th>Main risk</th><th>Platform controls</th></tr></thead>
+      <tbody>
+        <tr><td>Local STDIO</td><td>Each developer, unless you distribute it</td><td>Developer's environment</td><td>Malicious package or start-up command on a laptop; version sprawl</td><td>Allowlisted servers at pinned versions, run in containers; endpoint management; no shared tokens</td></tr>
+        <tr><td>Self-hosted on EKS</td><td>The platform team</td><td>Pod Identity, Secrets Manager</td><td>Server bugs with a real credential behind them</td><td>Everything in sections 3 to 7</td></tr>
+        <tr><td>Vendor remote</td><td>The vendor</td><td>OAuth tokens issued for that server</td><td>Data leaving your boundary; vendor-side flaws you can't patch</td><td>Gateway in the path, reviewed scopes, data classification, the vendor's security posture in procurement</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="owasp">9. The OWASP MCP Top 10 as platform controls</h2>
+    <p>The <a href="https://owasp.org/projects/mcp-top-10" rel="noopener">OWASP MCP Top 10</a> is still in beta, but it's already a useful checklist because it names risks in a way security reviewers recognise. This is how I'd map each item to an owner and a control, so the list turns into backlog items instead of a slide:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>OWASP item</th><th>Primary control</th><th>Where it lives</th></tr></thead>
+      <tbody>
+        <tr><td>MCP01 Token mismanagement and secret exposure</td><td>No static tokens in configs; Pod Identity and Secrets Manager; short-lived tokens</td><td>Terraform, External Secrets</td></tr>
+        <tr><td>MCP02 Privilege escalation via scope creep</td><td>One role per server; scope changes go through review</td><td>IAM, RBAC, registry</td></tr>
+        <tr><td>MCP03 Tool poisoning</td><td>Tool-definition hashes pinned and checked</td><td>Registry, gateway, CI</td></tr>
+        <tr><td>MCP04 Supply chain attacks and dependency tampering</td><td>Build in CI, lockfiles, SBOM, signed images, digest pinning</td><td>CI, ECR, Kyverno</td></tr>
+        <tr><td>MCP05 Command injection and execution</td><td>Minimal images, non-root, read-only root, no shell tools</td><td>Image build, pod security</td></tr>
+        <tr><td>MCP06 Prompt injection via contextual payloads</td><td>Treat arguments as untrusted; OPA on arguments; approvals for destructive tools</td><td>Gateway</td></tr>
+        <tr><td>MCP07 Insufficient authentication and authorization</td><td>Audience-bound tokens, no passthrough, ingress only from the gateway</td><td>Gateway, NetworkPolicy</td></tr>
+        <tr><td>MCP08 Lack of audit and telemetry</td><td>One span per tool call with agent, tool and decision</td><td>OpenTelemetry, SIEM</td></tr>
+        <tr><td>MCP09 Shadow MCP servers</td><td>Registry plus discovery: scan clusters and developer configs for unregistered servers</td><td>Platform, endpoint team</td></tr>
+        <tr><td>MCP10 Context injection and over-sharing</td><td>Servers return only what the task needs; log groups and repos scoped by role</td><td>Server design, IAM</td></tr>
+      </tbody>
+    </table></div>
+    <p>Shadow servers (MCP09) deserve a special mention, because they're the one you can't fix with configuration. Developers will add servers to their IDEs because they're useful. The answer that works is the same as with shadow IT generally: make the approved path easier than the unapproved one, with a self-service way to request a new server and a turnaround measured in days, not quarters.</p>
+
+    <h2 id="runbook">10. Runbook: the day an MCP CVE drops</h2>
+    <p>Treat an MCP CVE like any other dependency vulnerability, with one difference: you also need to know which agents could reach the affected tools. If you have a registry and gateway audit logs, this takes an hour. Without them, it takes a week of asking around. This is the runbook I'd keep next to the registry:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Step</th><th>Action</th><th>Done when</th></tr></thead>
+      <tbody>
+        <tr><td>1. Scope</td><td>Query the registry and SBOMs for the affected package and version range. Check developer configs for local copies.</td><td>A list of affected servers and owners</td></tr>
+        <tr><td>2. Contain</td><td>Disable the affected tools at the gateway (a registry change), or scale the server to zero. Contain first, patch second.</td><td>Calls to affected tools return a clear error</td></tr>
+        <tr><td>3. Assess exposure</td><td>Search gateway audit spans for calls to the affected tools since the vulnerable version was deployed. Check the server's role in CloudTrail for unusual calls.</td><td>Evidence that it was or wasn't used</td></tr>
+        <tr><td>4. Rotate</td><td>If exposure is possible, rotate the server's credentials: revoke tokens, rotate secrets. Pod Identity roles have no long-lived keys to rotate.</td><td>Old credentials are invalid</td></tr>
+        <tr><td>5. Patch</td><td>Rebuild with the fixed version, re-sign, re-run the tool-definition check, deploy by digest.</td><td>Fixed digest running, lock file updated</td></tr>
+        <tr><td>6. Re-enable and learn</td><td>Re-enable tools. Ask which control limited the impact, and which one should have. Write it up blamelessly.</td><td>Follow-up items in the backlog</td></tr>
+      </tbody>
+    </table></div>
+    <p>For prioritisation, use the same sources as the rest of your vulnerability programme: the <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" rel="noopener">CISA KEV catalog</a> for confirmed exploitation, EPSS for likelihood, and your own exposure data. A 9.3 in a server that can't reach anything is less urgent than a 6.8 in a server holding a write token to production.</p>
+
+    <h2 id="plan">11. A 30-day plan and checklist</h2>
+    <p>You don't need a gateway product on day one to make real progress. This is the order I'd follow:</p>
+    <ol>
+      <li><strong>Week 1: inventory.</strong> List every MCP server in use: in clusters, in CI, and in developer configs (ask, and scan). Record owner, version, credentials and upstream system. This is your first registry, even if it's a YAML file in Git.</li>
+      <li><strong>Week 2: identity and network.</strong> Move self-hosted servers into a dedicated namespace. Give each one its own Pod Identity role scoped to what it needs. Enforce IMDSv2 with hop limit 1, default-deny egress and ingress only from agents you know about.</li>
+      <li><strong>Week 3: supply chain.</strong> Build server images in CI with lockfiles and SBOMs, mirror to ECR with scan-on-push, sign them and enforce signatures in the namespace. Generate tool-definition lock files.</li>
+      <li><strong>Week 4: gateway and audit.</strong> Put a gateway in front, with audience checks, per-agent allowlists and one audit span per call. Add the drift check to CI and to a nightly job. Run the CVE runbook once as a tabletop exercise.</li>
+    </ol>
+    <p>And the checklist I'd use in a design review for any new MCP server:</p>
+    <ol>
+      <li>The server is in the registry with an owner, a purpose and an upstream system.</li>
+      <li>It talks to exactly one upstream system with its own narrowly scoped identity.</li>
+      <li>Its role can't write unless writing is the point, and destructive tools need approval.</li>
+      <li>It never receives or forwards a user's raw token; audiences are checked at every hop.</li>
+      <li>The image is built in CI from a lockfile, scanned, signed and deployed by digest.</li>
+      <li>It runs non-root with a read-only root filesystem, no capabilities and no Kubernetes token unless needed.</li>
+      <li>Egress is default-deny, with an allowlist of the hostnames it needs; IMDS isn't reachable.</li>
+      <li>Ingress is allowed only from the gateway.</li>
+      <li>Tool definitions are hashed, and changes fail CI until a human re-reviews them.</li>
+      <li>Every tool call produces an audit span with agent identity, tool, decision and result.</li>
+      <li>The CVE runbook has been rehearsed, and disabling a tool is a one-line registry change.</li>
+      <li>There's a fast, documented way for developers to get a new server approved.</li>
+    </ol>
+
+    <h2>The short version</h2>
+    <p>MCP servers are code you didn't write, holding credentials you did issue, taking input from a model that reads untrusted text. That's a supply chain dependency, and the 2026 CVEs mostly show familiar bugs in an unfamiliar place. The fixes are familiar too: an inventory, one narrow identity per server, audience-bound tokens with no passthrough, signed and pinned images, default-deny egress, pinned tool definitions, and an audit trail you can query. Do those, and the next MCP CVE is a ticket, not an incident.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/ai-sre-agents-incident-response/">AI SRE agents on call: an autonomy ladder for incident response</a><span>What an AI agent should be allowed to do during an incident: read-only identities, an action catalogue gated by OPA, approvals and promotion metrics.</span></li>
+      <li><a href="/blog/ai-agents-terraform-guardrails/">Guardrails for AI agents writing Terraform: OIDC, OPA and approval gates</a><span>A workspace with no cloud credentials, plan-only and apply-only OIDC roles, OPA on the plan JSON and GitLab CI approval gates.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
