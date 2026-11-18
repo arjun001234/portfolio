@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills | Arjun Kanojia</title>
+<meta name="description" content="How to prepare a platform on EKS and EC2 for a traffic spike: Akamai at the edge, MongoDB, Kafka, Aerospike and RDS, k6 load testing, KEDA and Karpenter pre-scaling, DR strategies with RTO/RPO, backup-restore and failover drills, and an event-day runbook. Lessons from running the FIFA World Cup 2026 platform at 10,000+ RPS.">
+<meta name="author" content="Arjun Kanojia">
+<link rel="canonical" href="https://arjunkanojia.com/blog/peak-traffic-lessons-fifa-world-cup-2026/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Arjun Kanojia">
+<meta property="og:title" content="Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills">
+<meta property="og:description" content="Multi-region architecture, load testing, KEDA and Karpenter pre-scaling, DR drills and an event-day runbook, from running a 10,000+ RPS platform with zero downtime.">
+<meta property="og:url" content="https://arjunkanojia.com/blog/peak-traffic-lessons-fifa-world-cup-2026/">
+<meta property="article:published_time" content="2026-10-08">
+<meta property="article:modified_time" content="2026-10-09">
+<meta property="article:author" content="Arjun Kanojia">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#07090D">
+<link rel="alternate" type="application/rss+xml" title="Arjun Kanojia's blog" href="/blog/feed.xml">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090D'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='13' fill='%233EE6C4' text-anchor='middle'%3EAK%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/blog/blog.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills",
+  "description": "How to prepare a Kubernetes platform for a traffic spike: multi-region architecture, k6 load testing, KEDA and Karpenter pre-scaling, DR strategies, DR drills and an event-day runbook.",
+  "datePublished": "2026-10-08",
+  "dateModified": "2026-10-09",
+  "inLanguage": "en",
+  "mainEntityOfPage": "https://arjunkanojia.com/blog/peak-traffic-lessons-fifa-world-cup-2026/",
+  "author": {"@type": "Person", "@id": "https://arjunkanojia.com/#person", "name": "Arjun Kanojia", "url": "https://arjunkanojia.com/"},
+  "publisher": {"@id": "https://arjunkanojia.com/#person"},
+  "keywords": "peak traffic, EKS, Karpenter, KEDA, Akamai, MongoDB, Kafka, Aerospike, RDS, k6 load testing, disaster recovery, backup restore drill, RTO, RPO, SRE, FIFA World Cup 2026"
+}
+</script>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+window.va('beforeSend', function (e) { try { if (localStorage.getItem('va-disable')) return null; } catch (x) {} return e; });</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main"><div class="wrap">
+  <a class="logo" href="/"><i aria-hidden="true"></i>ARJUN KANOJIA</a>
+  <ul><li class="hide-sm"><a href="/">Portfolio</a></li><li><a href="/blog/" aria-current="page">Blog</a></li><li><a href="/#contact">Contact</a></li></ul>
+</div></nav>
+
+<main class="wrap">
+<article>
+  <header>
+    <span class="eyebrow">Reliability · October 2026</span>
+    <h1>Surviving peak traffic on EKS: architecture, KEDA, Karpenter and DR drills</h1>
+    <p class="dek">Diwali sales in India and Black Friday in Germany and the rest of Europe all land in November. This is the playbook I'd use to get a Kubernetes platform through its biggest day, built on what I learned running the FIFA World Cup 2026 platform and on how the industry handles these events.</p>
+    <div class="meta"><time datetime="2026-10-08">8 October 2026</time> · updated 9 Oct · 16 min read · Arjun Kanojia</div>
+  </header>
+
+  <div class="prose">
+    <nav class="toc" aria-label="Contents"><b>In this post</b>
+      <ol>
+        <li><a href="#shape">What event traffic actually looks like</a></li>
+        <li><a href="#arch">The reference architecture</a></li>
+        <li><a href="#loadtest">Load testing that finds the knee</a></li>
+        <li><a href="#scaling">Scaling in layers: HPA, KEDA, Karpenter, headroom</a></li>
+        <li><a href="#dr">DR: picking a strategy by RTO and RPO</a></li>
+        <li><a href="#drills">DR drills: backup-restore, failover and game days</a></li>
+        <li><a href="#observe">Alerting and on-call for the big day</a></li>
+        <li><a href="#cost">Keeping the bill sane</a></li>
+        <li><a href="#runbook">The event-day runbook</a></li>
+      </ol>
+    </nav>
+
+    <p>Earlier this year I was on the team at Deutsche Telekom Digital Labs, spread across India and Germany, that ran the infrastructure behind the FIFA World Cup 2026 digital services. We peaked above 10,000 requests per second and had zero downtime through the tournament. The work behind that was not clever. It was a lot of boring preparation done early: multi-region DR with automated backup and restore, distributed k6 load tests, EKS and non-EKS tiers scaled up before every match, autoscaling on top, and an on-call rota that knew exactly what to do.</p>
+    <p>The stack was a typical mix you see at telecom and media scale: Akamai at the edge, stateless services on EKS, and a stateful tier we ran ourselves on EC2, with MongoDB, Kafka and Aerospike, plus Amazon RDS. That mix matters, because the managed and containerised parts scale in seconds while self-managed databases and brokers on EC2 do not. Most of the real preparation went into the second group.</p>
+    <p>Teams in India are about to face the same shape of problem with the festive sales, and teams in Germany and across Europe with Black Friday and Cyber Monday. So here is the full playbook, with the configs, not just the principles.</p>
+
+    <h2 id="shape">1. What event traffic actually looks like</h2>
+    <p>Normal daily traffic rises and falls over hours. Event traffic doesn't. Before a kickoff or a sale opens, it sits near baseline, then jumps several times over in a few minutes as everyone opens the app together. Three things make that spike nastier than the raw number suggests:</p>
+    <ul>
+      <li><strong>Cold caches.</strong> The first wave hits endpoints that haven't been called in hours, so cache hit rates drop exactly when load peaks and the database takes the full force.</li>
+      <li><strong>Retry storms.</strong> When latency creeps up, clients and SDKs retry. A 5% error rate can quietly double the real request volume if retries have no backoff and jitter.</li>
+      <li><strong>Login and token bursts.</strong> Auth, session and token-refresh services are usually sized for steady state, and they become the first bottleneck because every client hits them at once.</li>
+    </ul>
+    <p>The lesson: you can't react your way through a step change. Capacity has to be in place before the spike, and the reactive parts of the system are there to absorb what you got wrong.</p>
+
+    <h2 id="arch">2. The reference architecture</h2>
+    <p>This is the reference layout I'd draw for this kind of stack: a CDN edge absorbing as much as possible, two AWS regions, stateless services on EKS, and a stateful tier on EC2 and RDS whose data is copied to the second region so it can take over.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 540" role="img" aria-label="Multi-region architecture: users reach the Akamai edge with CDN caching, WAF and bot and rate controls, then health-checked DNS failover routes to an active AWS region and a warm standby region. Each region has an ALB, an EKS cluster for stateless services with KEDA and Karpenter, and an EC2 data tier with MongoDB, Kafka and Aerospike plus Amazon RDS. Data and backups are copied to the standby region." font-family="Geist, system-ui, sans-serif">
+        <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5D6977"/></marker></defs>
+        <rect x="300" y="10" width="160" height="40" rx="10" fill="#131A23" stroke="#2A3848"/><text x="380" y="35" text-anchor="middle" fill="#E9EEF4" font-size="13" font-weight="600">Users / mobile apps</text>
+        <line x1="380" y1="50" x2="380" y2="74" stroke="#5D6977" stroke-width="1.5" marker-end="url(#ar)"/>
+        <rect x="170" y="76" width="420" height="48" rx="10" fill="#0E131A" stroke="#3EE6C4"/><text x="380" y="97" text-anchor="middle" fill="#3EE6C4" font-size="13" font-weight="600">Akamai edge: CDN + WAF + bot and rate controls</text><text x="380" y="114" text-anchor="middle" fill="#8B97A6" font-size="11">cache static + short-TTL API · absorb DDoS · shed abusive clients</text>
+        <line x1="380" y1="124" x2="380" y2="146" stroke="#5D6977" stroke-width="1.5" marker-end="url(#ar)"/>
+        <rect x="230" y="148" width="300" height="40" rx="10" fill="#0E131A" stroke="#7CA7FF"/><text x="380" y="173" text-anchor="middle" fill="#7CA7FF" font-size="12.5" font-weight="600">DNS failover + health checks</text>
+        <line x1="320" y1="188" x2="200" y2="222" stroke="#5D6977" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="440" y1="188" x2="560" y2="222" stroke="#5D6977" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+        <rect x="20" y="224" width="340" height="270" rx="14" fill="none" stroke="#3EE6C4"/><text x="36" y="246" fill="#3EE6C4" font-size="12" font-weight="600">AWS REGION A · ACTIVE</text>
+        <rect x="400" y="224" width="340" height="270" rx="14" fill="none" stroke="#FF9E6D" stroke-dasharray="6 5"/><text x="416" y="246" fill="#FF9E6D" font-size="12" font-weight="600">AWS REGION B · WARM STANDBY</text>
+        <rect x="40" y="258" width="300" height="34" rx="8" fill="#131A23" stroke="#2A3848"/><text x="190" y="280" text-anchor="middle" fill="#E9EEF4" font-size="12">ALB (multi-AZ)</text>
+        <rect x="420" y="258" width="300" height="34" rx="8" fill="#131A23" stroke="#2A3848"/><text x="570" y="280" text-anchor="middle" fill="#E9EEF4" font-size="12">ALB (multi-AZ)</text>
+        <rect x="40" y="302" width="300" height="62" rx="8" fill="#131A23" stroke="#2A3848"/><text x="190" y="323" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">EKS · stateless services</text><text x="190" y="342" text-anchor="middle" fill="#8B97A6" font-size="11">HPA / KEDA · Karpenter (on-demand + Spot)</text>
+        <rect x="420" y="302" width="300" height="62" rx="8" fill="#131A23" stroke="#2A3848"/><text x="570" y="323" text-anchor="middle" fill="#E9EEF4" font-size="12" font-weight="600">EKS · scaled down</text><text x="570" y="342" text-anchor="middle" fill="#8B97A6" font-size="11">same manifests via GitOps</text>
+        <text x="40" y="384" fill="#8B97A6" font-size="10.5" font-weight="600">EC2 + RDS DATA TIER (pre-scaled, not autoscaled)</text>
+        <rect x="40" y="392" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="112" y="417" text-anchor="middle" fill="#E9EEF4" font-size="11.5">MongoDB replica set</text>
+        <rect x="195" y="392" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="267" y="417" text-anchor="middle" fill="#E9EEF4" font-size="11.5">Kafka brokers</text>
+        <rect x="40" y="440" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="112" y="465" text-anchor="middle" fill="#E9EEF4" font-size="11.5">Aerospike cluster</text>
+        <rect x="195" y="440" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="267" y="465" text-anchor="middle" fill="#E9EEF4" font-size="11.5">Amazon RDS (primary)</text>
+        <text x="420" y="384" fill="#8B97A6" font-size="10.5" font-weight="600">REPLICAS + RESTORED BACKUPS</text>
+        <rect x="420" y="392" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="492" y="417" text-anchor="middle" fill="#E9EEF4" font-size="11.5">MongoDB secondaries</text>
+        <rect x="575" y="392" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="647" y="417" text-anchor="middle" fill="#E9EEF4" font-size="11.5">Kafka (mirrored)</text>
+        <rect x="420" y="440" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="492" y="465" text-anchor="middle" fill="#E9EEF4" font-size="11.5">Aerospike (XDR)</text>
+        <rect x="575" y="440" width="145" height="40" rx="8" fill="#131A23" stroke="#2A3848"/><text x="647" y="465" text-anchor="middle" fill="#E9EEF4" font-size="11.5">RDS read replica</text>
+        <line x1="342" y1="436" x2="416" y2="436" stroke="#7CA7FF" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+        <text x="380" y="524" text-anchor="middle" fill="#7CA7FF" font-size="11">cross-region: replica members · MirrorMaker 2 · Aerospike XDR · RDS replica · snapshots and backups copied</text>
+      </svg>
+      <figcaption>Fig 1. Reference active / warm-standby layout for an Akamai + EKS + EC2 + RDS stack. Stateless services fail over in minutes; the data tier decides your real RTO and RPO.</figcaption>
+    </figure>
+
+    <p>A few decisions in that picture matter more than they look:</p>
+    <ul>
+      <li><strong>The edge is your first autoscaler.</strong> Every request Akamai answers from cache never reaches your origin. For event traffic, put short TTLs (even 5 to 30 seconds) on read-heavy API responses like scores, prices and catalogue pages. A 5-second cache on a hot endpoint can turn tens of thousands of requests into one per edge location.</li>
+      <li><strong>Edge rate controls protect you from yourself.</strong> Rate and bot rules at the CDN stop one buggy client version or a scraper from eating the headroom you planned for real users.</li>
+      <li><strong>Same manifests in both regions.</strong> With GitOps (Argo CD in our case), the standby cluster runs the exact same versions. The only difference between regions should be replica counts and which database is the writer.</li>
+      <li><strong>Self-managed data stores don't autoscale.</strong> You can't add a MongoDB shard, rebalance Kafka partitions or grow an Aerospike cluster in the minutes before kickoff. Those tiers are sized from the load test and scaled up days in advance, with headroom for the worst case.</li>
+      <li><strong>Data is the hard part.</strong> Stateless services fail over in minutes. Databases and brokers decide your real RTO and RPO, which is why the DR section below is mostly about data.</li>
+    </ul>
+
+    <h2 id="loadtest">3. Load testing that finds the knee</h2>
+    <p>We used distributed k6 runs before match days. The goal of a load test is not a green report. It's finding the <em>knee</em>: the point where latency stops rising gently and starts climbing steeply, because that's your real capacity, and it's always lower than the sum of your pod limits.</p>
+    <p>The executor matters. Most first attempts use a fixed number of virtual users, which accidentally slows down when the system slows down (closed model). Real users don't wait politely, so use an arrival-rate executor (open model) that keeps sending requests whatever the latency. The <a href="https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/ramping-arrival-rate/" rel="noopener">k6 docs</a> explain the difference well.</p>
+<pre><code><span class="c">// kickoff.js: model a step change, not a gentle ramp</span>
+<span class="k">import</span> http <span class="k">from</span> <span class="s">'k6/http'</span>;
+<span class="k">import</span> { check } <span class="k">from</span> <span class="s">'k6'</span>;
+
+<span class="k">export const</span> options = {
+  scenarios: {
+    kickoff: {
+      executor: <span class="s">'ramping-arrival-rate'</span>,
+      startRate: 800, timeUnit: <span class="s">'1s'</span>,
+      preAllocatedVUs: 2000, maxVUs: 12000,
+      stages: [
+        { target: 800,   duration: <span class="s">'10m'</span> },  <span class="c">// baseline</span>
+        { target: 12000, duration: <span class="s">'3m'</span>  },  <span class="c">// the spike, steeper than real life</span>
+        { target: 12000, duration: <span class="s">'20m'</span> },  <span class="c">// hold: leaks, pool exhaustion, GC</span>
+        { target: 3000,  duration: <span class="s">'5m'</span>  },
+      ],
+    },
+  },
+  thresholds: {
+    http_req_failed:   [<span class="s">'rate&lt;0.005'</span>],
+    http_req_duration: [<span class="s">'p(95)&lt;400'</span>, <span class="s">'p(99)&lt;900'</span>],
+  },
+};
+
+<span class="k">export default function</span> () {
+  <span class="c">// weight endpoints by real traffic mix from your access logs</span>
+  <span class="k">const</span> r = Math.random();
+  <span class="k">const</span> path = r &lt; 0.6 ? <span class="s">'/api/live'</span> : r &lt; 0.85 ? <span class="s">'/api/feed'</span> : <span class="s">'/api/auth/refresh'</span>;
+  check(http.get(`${__ENV.BASE}${path}`), { <span class="s">'2xx'</span>: (res) =&gt; res.status &lt; 300 });
+}</code></pre>
+    <p>What I'd insist on for any serious event test:</p>
+    <ul>
+      <li><strong>Test above the forecast.</strong> Industry practice is to test at 1.5x to 2x the expected peak, because forecasts for big events are usually wrong in the same direction.</li>
+      <li><strong>Run it from outside, through the real edge.</strong> Testing the ALB directly skips Akamai, its caching and rate rules, and DNS, which are part of the path users take. Agree the test with your CDN provider first so it isn't blocked as an attack.</li>
+      <li><strong>Hold the peak.</strong> A 2-minute spike tells you nothing about connection pool exhaustion, memory growth or database replication lag. Hold for 20 minutes or more.</li>
+      <li><strong>Watch the dependencies, not just the pods.</strong> The knee is usually in the data tier: MongoDB connection counts and replication lag, Kafka consumer lag and broker disk throughput, Aerospike latency histograms, RDS connections. Or it's an auth service or a third-party API quota.</li>
+      <li><strong>Test, fix, test again.</strong> Leave enough calendar time for at least two rounds. A test the week before launch can only give you bad news.</li>
+    </ul>
+
+    <h2 id="scaling">4. Scaling in layers: HPA, KEDA, Karpenter, headroom</h2>
+    <p>Autoscaling on Kubernetes is really four separate loops, and each has a different reaction time. Understanding that is the whole game.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 300" role="img" aria-label="Timeline from 60 minutes before kickoff to 60 minutes after. Traffic is flat then jumps sharply at kickoff. Capacity steps up at T minus 45 minutes from the KEDA cron pre-scale, has a buffer of headroom pods, and Karpenter adds nodes reactively after kickoff, staying above the traffic line." font-family="Geist, system-ui, sans-serif">
+        <line x1="60" y1="250" x2="740" y2="250" stroke="#2A3848"/><line x1="60" y1="30" x2="60" y2="250" stroke="#2A3848"/>
+        <text x="20" y="40" fill="#8B97A6" font-size="11" transform="rotate(-90 20 140)">requests / capacity</text>
+        <g fill="#5D6977" font-size="11" text-anchor="middle"><text x="60" y="270">T−60</text><text x="230" y="270">T−30</text><text x="400" y="270">kickoff</text><text x="570" y="270">T+30</text><text x="740" y="270">T+60</text></g>
+        <line x1="400" y1="30" x2="400" y2="250" stroke="#2A3848" stroke-dasharray="4 4"/>
+        <path d="M60,215 L140,214 L141,120 L380,120 L380,84 L425,84 L445,66 L480,58 L740,58" fill="none" stroke="#3EE6C4" stroke-width="2.5"/>
+        <path d="M60,228 L300,226 L360,222 L392,205 L404,110 L420,92 L460,86 L520,90 L600,94 L740,96" fill="none" stroke="#FF9E6D" stroke-width="2.5"/>
+        <g font-size="11"><circle cx="141" cy="120" r="4" fill="#3EE6C4"/><text x="148" y="112" fill="#3EE6C4">KEDA cron pre-scale (T−45)</text>
+        <text x="160" y="140" fill="#8B97A6">+ headroom pods hold spare nodes</text><text x="300" y="78" fill="#3EE6C4">headroom</text>
+        <circle cx="445" cy="66" r="4" fill="#3EE6C4"/><text x="452" y="46" fill="#3EE6C4">Karpenter + KEDA react to real load</text>
+        <text x="560" y="115" fill="#FF9E6D">traffic</text><text x="670" y="50" fill="#3EE6C4">capacity</text></g>
+      </svg>
+      <figcaption>Fig 2. Capacity has to lead traffic. Scheduled pre-scaling covers the step; reactive scaling covers the error in your forecast.</figcaption>
+    </figure>
+
+    <div class="tbl"><table>
+      <thead><tr><th>Layer</th><th>What it scales</th><th>Typical reaction time</th><th>Role on event day</th></tr></thead>
+      <tbody>
+        <tr><td>HPA</td><td>Pods, on CPU or memory</td><td>15 s to a few minutes</td><td>Baseline elasticity. Too slow and too indirect for a step change on its own.</td></tr>
+        <tr><td>KEDA</td><td>Pods, on events, queues, Prometheus queries or a schedule</td><td>Seconds after the metric moves</td><td>Scale on the real signal (RPS, queue lag) and pre-scale on a cron schedule.</td></tr>
+        <tr><td>Karpenter</td><td>Nodes</td><td>Roughly 45 to 90 s for a new node to be Ready</td><td>Adds capacity when pods are pending. Fast, but image pulls and readiness add more.</td></tr>
+        <tr><td>Headroom pods</td><td>Spare node capacity</td><td>Instant</td><td>Low-priority placeholder pods that real pods evict, so nodes already exist when the spike lands.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>KEDA: scale on the schedule and on the real signal</h3>
+    <p>I've used KEDA in production for event-driven scaling, and its most underrated feature for events is combining a <a href="https://keda.sh/docs/latest/scalers/cron/" rel="noopener">cron scaler</a> with a metric scaler. KEDA takes the highest value across triggers, so the cron trigger sets a floor before kickoff and the Prometheus trigger takes over if real traffic goes beyond it.</p>
+<pre><code><span class="k">apiVersion</span>: keda.sh/v1alpha1
+<span class="k">kind</span>: ScaledObject
+<span class="k">metadata</span>:
+  <span class="k">name</span>: live-api
+<span class="k">spec</span>:
+  <span class="k">scaleTargetRef</span>: { <span class="k">name</span>: live-api }
+  <span class="k">minReplicaCount</span>: 6
+  <span class="k">maxReplicaCount</span>: 300
+  <span class="k">advanced</span>:
+    <span class="k">horizontalPodAutoscalerConfig</span>:
+      <span class="k">behavior</span>:
+        <span class="k">scaleUp</span>:   { <span class="k">stabilizationWindowSeconds</span>: 0,
+                     <span class="k">policies</span>: [{ <span class="k">type</span>: Percent, <span class="k">value</span>: 100, <span class="k">periodSeconds</span>: 15 }] }
+        <span class="k">scaleDown</span>: { <span class="k">stabilizationWindowSeconds</span>: 900 }   <span class="c"># don't drop capacity at half-time</span>
+  <span class="k">triggers</span>:
+    - <span class="k">type</span>: cron                          <span class="c"># floor from 45 min before kickoff</span>
+      <span class="k">metadata</span>:
+        <span class="k">timezone</span>: Asia/Kolkata
+        <span class="k">start</span>: <span class="s">"15 19 * * *"</span>
+        <span class="k">end</span>:   <span class="s">"30 22 * * *"</span>
+        <span class="k">desiredReplicas</span>: <span class="s">"120"</span>
+    - <span class="k">type</span>: prometheus                    <span class="c"># real demand: RPS per pod</span>
+      <span class="k">metadata</span>:
+        <span class="k">serverAddress</span>: http://prometheus.monitoring:9090
+        <span class="k">query</span>: sum(rate(http_requests_total{service="live-api"}[1m]))
+        <span class="k">threshold</span>: <span class="s">"80"</span>                  <span class="c"># target RPS per pod, from the load test knee</span></code></pre>
+    <p>The threshold isn't a guess. Take the per-pod RPS where your load test showed p99 latency starting to bend, then set the target at about 70 to 80% of it. That margin is what absorbs the minute before new pods are ready.</p>
+
+    <h3>Karpenter: the right nodes, and no surprises mid-event</h3>
+    <p>Karpenter is excellent at provisioning fast and at <a href="https://karpenter.sh/docs/concepts/disruption/" rel="noopener">consolidating</a> nodes to save money. That second part is exactly what you don't want during a match. A disruption budget with a schedule freezes voluntary disruption for the event window, while still letting Karpenter add nodes.</p>
+<pre><code><span class="k">apiVersion</span>: karpenter.sh/v1
+<span class="k">kind</span>: NodePool
+<span class="k">metadata</span>:
+  <span class="k">name</span>: event-burst
+<span class="k">spec</span>:
+  <span class="k">template</span>:
+    <span class="k">spec</span>:
+      <span class="k">nodeClassRef</span>: { <span class="k">group</span>: karpenter.k8s.aws, <span class="k">kind</span>: EC2NodeClass, <span class="k">name</span>: default }
+      <span class="k">requirements</span>:
+        - { <span class="k">key</span>: karpenter.sh/capacity-type, <span class="k">operator</span>: In, <span class="k">values</span>: [spot, on-demand] }
+        - { <span class="k">key</span>: karpenter.k8s.aws/instance-category, <span class="k">operator</span>: In, <span class="k">values</span>: [c, m] }
+        - { <span class="k">key</span>: karpenter.k8s.aws/instance-generation, <span class="k">operator</span>: Gt, <span class="k">values</span>: [<span class="s">"5"</span>] }
+        - { <span class="k">key</span>: kubernetes.io/arch, <span class="k">operator</span>: In, <span class="k">values</span>: [amd64, arm64] }
+  <span class="k">limits</span>:
+    <span class="k">cpu</span>: <span class="s">"4000"</span>                           <span class="c"># a ceiling, so a bug can't scale you into a huge bill</span>
+  <span class="k">disruption</span>:
+    <span class="k">consolidationPolicy</span>: WhenEmptyOrUnderutilized
+    <span class="k">consolidateAfter</span>: 10m
+    <span class="k">budgets</span>:
+      - <span class="k">nodes</span>: <span class="s">"10%"</span>                    <span class="c"># normal days: gentle churn</span>
+      - <span class="k">nodes</span>: <span class="s">"0"</span>                      <span class="c"># event window: no voluntary disruption</span>
+        <span class="k">schedule</span>: <span class="s">"0 13 * * *"</span>           <span class="c"># UTC; 18:30 IST</span>
+        <span class="k">duration</span>: 5h</code></pre>
+    <p>Two details people miss. First, allow many instance types and both architectures if your images are multi-arch, because a narrow list is how you hit "insufficient capacity" for one instance type in one AZ at the worst moment. Second, keep the critical path on on-demand capacity with a separate NodePool and use Spot for the burst, so a Spot interruption wave can only ever cost you extra capacity, never your baseline.</p>
+
+    <h3>Headroom pods: buy the 90 seconds back</h3>
+    <p>Even with Karpenter, a pending pod waits for a node to launch, join, pull images and pass readiness. The standard trick is overprovisioning: run placeholder pods at a negative priority. They reserve real nodes. When a real pod needs room, the scheduler evicts a placeholder instantly, the real pod starts on a node that already exists, and Karpenter replaces the evicted placeholder's capacity in the background.</p>
+<pre><code><span class="k">apiVersion</span>: scheduling.k8s.io/v1
+<span class="k">kind</span>: PriorityClass
+<span class="k">metadata</span>: { <span class="k">name</span>: headroom }
+<span class="k">value</span>: -10
+<span class="k">preemptionPolicy</span>: Never
+<span class="k">globalDefault</span>: false
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>: { <span class="k">name</span>: headroom, <span class="k">namespace</span>: kube-system }
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 20                           <span class="c"># scale this up with a KEDA cron before the event</span>
+  <span class="k">selector</span>: { <span class="k">matchLabels</span>: { <span class="k">app</span>: headroom } }
+  <span class="k">template</span>:
+    <span class="k">metadata</span>: { <span class="k">labels</span>: { <span class="k">app</span>: headroom } }
+    <span class="k">spec</span>:
+      <span class="k">priorityClassName</span>: headroom
+      <span class="k">terminationGracePeriodSeconds</span>: 0
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: pause
+          <span class="k">image</span>: registry.k8s.io/pause:3.9
+          <span class="k">resources</span>: { <span class="k">requests</span>: { <span class="k">cpu</span>: <span class="s">"2"</span>, <span class="k">memory</span>: 4Gi } }</code></pre>
+    <p>One more thing that matters as much as any of this: pre-pull your images. A DaemonSet that pulls the big application images onto every new node, or images baked into the AMI, removes the slowest step from node startup.</p>
+
+    <h3>The stateful tier on EC2: scale it days ahead</h3>
+    <p>This is the part most autoscaling articles skip. Kubernetes autoscalers do nothing for MongoDB, Kafka or Aerospike running on EC2. Capacity there is planned, not reactive, and the industry practice looks like this:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Store</th><th>What limits you at peak</th><th>How to prepare</th></tr></thead>
+      <tbody>
+        <tr><td>MongoDB (replica set / shards)</td><td>Connections, working set vs RAM, write concern latency, replication lag</td><td>Size the working set to fit in memory, cap and pool connections per service, scale instance size or add shards well before the event, and keep secondaries in another AZ and region.</td></tr>
+        <tr><td>Kafka on EC2</td><td>Partition count, broker disk and network throughput, consumer lag</td><td>Set partitions for peak consumer parallelism in advance (you can't easily shrink them later), add brokers and rebalance days before, and use KEDA on consumer lag for the consumers.</td></tr>
+        <tr><td>Aerospike</td><td>Memory and index headroom, device throughput, migrations</td><td>Add nodes early so data migrations finish long before the event, keep headroom below the high-water marks, and never trigger a migration on match day.</td></tr>
+        <tr><td>Amazon RDS</td><td>Connections, IOPS, CPU, replica lag</td><td>Scale the instance class ahead (it causes a failover), add read replicas, put a connection pooler or RDS Proxy in front, and move hot reads to cache.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="callout">The golden rule for stateful systems on event day: no topology changes. No rebalances, no migrations, no instance resizes, no version upgrades. Everything that moves data around happens at least a few days before, while you still have time to recover if it goes wrong.</p>
+
+    <h2 id="dr">5. DR: picking a strategy by RTO and RPO</h2>
+    <p>Disaster recovery starts with two numbers the business has to agree to, not engineering. <strong>RTO</strong> (recovery time objective) is how long you can be down. <strong>RPO</strong> (recovery point objective) is how much data you can afford to lose. AWS describes four standard strategies in its <a href="https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html" rel="noopener">DR whitepaper</a>, and every serious plan maps to one of them:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Strategy</th><th>What runs in the DR region</th><th>Typical RTO</th><th>Typical RPO</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td>Backup and restore</td><td>Nothing. Backups are copied there.</td><td>Hours</td><td>Hours (last backup)</td><td>Lowest</td></tr>
+        <tr><td>Pilot light</td><td>Data replicated; compute off</td><td>Tens of minutes</td><td>Seconds to minutes</td><td>Low</td></tr>
+        <tr><td>Warm standby</td><td>A scaled-down but working copy</td><td>Minutes</td><td>Seconds</td><td>Medium</td></tr>
+        <tr><td>Multi-site active/active</td><td>Full capacity serving traffic</td><td>Near zero</td><td>Near zero</td><td>Highest</td></tr>
+      </tbody>
+    </table></div>
+    <p>For a platform with a hard event date, warm standby is the sweet spot most teams land on. The pieces that make it work on AWS:</p>
+    <ul>
+      <li><strong>MongoDB:</strong> place replica set members in the second region (with lower priority so they don't become primary by accident), plus scheduled snapshots or <code>mongodump</code>/PITR backups copied cross-region. Failover is a controlled reconfig or an election, not a restore.</li>
+      <li><strong>Kafka:</strong> MirrorMaker 2 replicates topics and consumer group offsets to a cluster in the second region. Decide upfront which topics need replication at all; many event streams can simply be rebuilt.</li>
+      <li><strong>Aerospike:</strong> Cross-Datacenter Replication (XDR) ships writes asynchronously to the remote cluster, so RPO is the shipping lag. Back it with periodic <code>asbackup</code> to S3.</li>
+      <li><strong>Amazon RDS:</strong> a cross-region read replica you can promote, plus automated snapshots copied cross-region with AWS Backup. Promotion is one-way, so plan the fail-back.</li>
+      <li><strong>Kubernetes state:</strong> the cluster itself should be rebuildable from Terraform and GitOps in minutes. Anything that isn't in Git, like PersistentVolumes, gets backed up with Velero or AWS Backup and copied cross-region.</li>
+      <li><strong>Objects and secrets:</strong> S3 cross-region replication, and secrets replicated to the second region (Secrets Manager supports replica secrets), so a failover doesn't stall on a missing credential.</li>
+      <li><strong>Traffic:</strong> health-checked DNS failover, either at the CDN or DNS provider (Akamai has its own traffic management) or with Route 53. Many teams use a manual, audited switch, such as Route 53 Application Recovery Controller, rather than a fully automatic one.</li>
+    </ul>
+    <p class="callout">Automatic regional failover sounds attractive, but many teams deliberately keep the final switch manual. A flapping health check that moves traffic between regions during a match can cause more damage than the original fault. Automate everything up to the decision, then have one person press the button.</p>
+
+    <h2 id="drills">6. DR drills: backup-restore, failover and game days</h2>
+    <p>A DR plan you haven't run is a document, not a capability. At Avizva, where we ran multi-region HA for EKS, MongoDB and Elasticsearch for SOC 2 healthcare clients, we got recovery in DR scenarios down to 30 minutes, and the only reason we knew that number was that we kept drilling it. Here is how I'd structure drills before any big event:</p>
+    <h3>Four kinds of drill</h3>
+    <ol>
+      <li><strong>Backup and restore drill.</strong> Take last night's backups and restore them into a clean environment, on a schedule, without warning the team in advance. Time it, then check the data is actually usable: row and document counts, a few known records, and the application booting against it. This is the drill most teams skip and the one that most often fails, usually because of a missing permission, an expired key or a backup that was silently incomplete.</li>
+      <li><strong>Tabletop.</strong> The on-call team walks through the runbook in a room: "the primary database is unreachable, what do we do, who decides, how do we tell the business?" It's cheap, and it finds missing access, missing steps and unclear ownership.</li>
+      <li><strong>Component failover.</strong> Kill something real in staging, then in production during low traffic: terminate nodes, fail over the database writer, block one AZ with security group or NACL changes, or use <a href="https://aws.amazon.com/fis/" rel="noopener">AWS Fault Injection Service</a> to inject failures in a controlled way.</li>
+      <li><strong>Region evacuation.</strong> Move real production traffic to the standby region and back, on a schedule, with the business informed. This is the only test that proves your RTO.</li>
+    </ol>
+    <h3>Backup and restore drill runbook</h3>
+<pre><code><span class="c"># Restore drill: prove backups are usable (run monthly, and 2 weeks before any big event)</span>
+T-0    Pick a random recent backup set; start the clock in #dr-drill
+T+5m   Restore RDS snapshot to a new instance (copy from the DR region vault)
+T+5m   Restore MongoDB snapshot / PITR to a scratch replica set on EC2
+T+5m   Restore Aerospike from asbackup files in S3 to a test cluster
+T+5m   Recreate Kafka topics from IaC; replay from MirrorMaker 2 copy if needed
+T+40m  Validate: counts vs source, checksums on sample records, schema version
+T+50m  Boot the app against restored data; run smoke tests
+T+60m  Record actual restore time per store and any data gap (= real RPO)
+After  Tear down; ticket every manual or slow step; update the runbook</code></pre>
+    <p>Two things make restore drills honest. Restore from the copy in the DR region, not the local one, because that's what you'll have in a real regional outage. And restore with the permissions the on-call engineer actually has, not an admin role, so you find access problems in a drill instead of during an incident.</p>
+
+    <h3>Region failover drill runbook</h3>
+<pre><code><span class="c"># DR drill: region evacuation (target RTO 15m, RPO &lt; 1m)</span>
+T-0    Announce start in #incident-drill, start the clock
+T+1m   Freeze deploys (Argo CD sync windows), confirm replication lag &lt; 1s
+T+2m   Scale Region B: KEDA cron override + Karpenter limits up
+T+6m   Verify Region B pods Ready, synthetic checks green
+T+7m   Promote RDS replica; step up MongoDB DR members; repoint consumers to mirrored Kafka
+T+10m  Flip DNS / traffic routing to Region B behind the edge
+T+12m  Watch error rate, p99, login success, payment success
+T+15m  Declare recovered, record actual RTO and data loss
+After  Fail back the same way; write up every step that was slow or manual</code></pre>
+    <p>Three rules that make drills worth the effort:</p>
+    <ul>
+      <li><strong>Measure, don't estimate.</strong> Record actual RTO and RPO every time and track the trend. If a drill takes 40 minutes against a 15-minute target, that's the most useful thing you learned all month.</li>
+      <li><strong>Rotate who runs it.</strong> If only one engineer can fail over the platform, you don't have DR, you have a person.</li>
+      <li><strong>Every manual step becomes a ticket.</strong> The goal over time is a runbook where each step is a script or a pipeline job that someone triggers, not a sequence of console clicks.</li>
+    </ul>
+
+    <h2 id="observe">7. Alerting and on-call for the big day</h2>
+    <p>I carried on-call through live matches, and what made those shifts calm was preparation, not heroics. On event day you want dashboards that answer "are users OK?" in five seconds, and alerts on symptoms users feel, not on causes.</p>
+    <p>The best practice here comes from the <a href="https://sre.google/workbook/alerting-on-slos/" rel="noopener">Google SRE Workbook</a>: alert on <strong>SLO burn rate</strong> over two windows. A fast burn (for example 14.4x your error budget over 1 hour, confirmed over 5 minutes) pages someone. A slow burn opens a ticket. This catches real problems quickly and ignores short blips.</p>
+<pre><code><span class="k">groups</span>:
+- <span class="k">name</span>: live-api-slo
+  <span class="k">rules</span>:
+  - <span class="k">alert</span>: LiveApiFastBurn
+    <span class="k">expr</span>: |
+      (
+        sum(rate(http_requests_total{service="live-api",code=~"5.."}[1h]))
+        / sum(rate(http_requests_total{service="live-api"}[1h]))
+      ) &gt; (14.4 * 0.001)
+      and
+      (
+        sum(rate(http_requests_total{service="live-api",code=~"5.."}[5m]))
+        / sum(rate(http_requests_total{service="live-api"}[5m]))
+      ) &gt; (14.4 * 0.001)
+    <span class="k">labels</span>:  { <span class="k">severity</span>: page }
+    <span class="k">annotations</span>:
+      <span class="k">summary</span>: <span class="s">"live-api burning 99.9% SLO budget fast"</span>
+      <span class="k">runbook</span>: <span class="s">"https://runbooks.internal/live-api#fast-burn"</span></code></pre>
+    <p>For the event itself, add a few things you wouldn't run day to day: a staffed war room with clear roles (incident commander, communications, one engineer per critical dependency), with hand-overs agreed if your team spans time zones like India and Germany, a pre-written status-page message, and a short list of "break glass" switches like feature flags to turn off expensive features (recommendations, heavy personalisation) if the database starts to struggle. Shedding a nice-to-have feature for 10 minutes is far better than an outage. Incident tooling helps here too. At Avizva, adopting Zenduty for routing and escalation kept our MTTR to about 30 minutes at most.</p>
+
+    <h2 id="cost">8. Keeping the bill sane</h2>
+    <p>Headroom for a peak gets expensive quickly if you buy it the wrong way. What has worked for me is putting stateless workloads on Spot and covering the steady, stateful baseline with Reserved Instances (or Savings Plans). In a previous role, that mix cut our EC2 cost by roughly 25 to 30%. It also made the extra capacity for big days cheap enough that nobody argued about pre-scaling.</p>
+    <p>For Spot, the industry rules are well established: diversify across many instance types and every AZ, handle the two-minute interruption notice (Karpenter does this natively when you configure its interruption queue), set PodDisruptionBudgets so evictions are gradual, and never put anything stateful or singleton on it.</p>
+
+    <h2 id="runbook">9. The event-day runbook</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>When</th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td>T−4 weeks</td><td>Agree on RTO/RPO and the traffic forecast with the business. First full load test through the real edge.</td></tr>
+        <tr><td>T−3 weeks</td><td>Fix the first bottleneck, re-test at 1.5x to 2x forecast. Raise AWS service quotas (EC2 vCPU, ALB, NAT, RDS connections) now, not on the day. Scale up MongoDB, Kafka and Aerospike so rebalances and migrations finish early.</td></tr>
+        <tr><td>T−2 weeks</td><td>Backup and restore drill, then a region evacuation drill, both timed. Tabletop with the on-call rota across India and Germany. Fix every slow manual step.</td></tr>
+        <tr><td>T−1 week</td><td>Change freeze for platform components and no topology changes in the data tier. Karpenter disruption budgets and KEDA cron floors merged via GitOps. Final load test.</td></tr>
+        <tr><td>T−1 day</td><td>Confirm last backups completed and copied cross-region, and check replication lag on MongoDB, Kafka mirroring, Aerospike XDR and RDS. Warm caches and the CDN. Pre-pull images. Status-page draft ready.</td></tr>
+        <tr><td>T−2 hours</td><td>War room open. Dashboards on screen. Headroom pods scaled up, standby region checked.</td></tr>
+        <tr><td>T−45 min</td><td>Cron pre-scale kicks in. Verify replica counts and node counts against the plan.</td></tr>
+        <tr><td>Event</td><td>Watch SLO burn, p99, database connections and replication lag. Feature flags ready. One person makes decisions.</td></tr>
+        <tr><td>T+1 day</td><td>Scale down deliberately. Blameless review: forecast vs actual, what scaled, what didn't, and what to automate next.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2>The short version</h2>
+    <p>None of this is exotic. Big events rarely fail because of a clever new failure mode. They fail because a load test was skipped, a quota wasn't raised, a failover was never practised, or capacity was left to react to a spike it could never catch. If your biggest day is a few weeks out, there's still time to do every step above. Start with the load test and the DR drill, because those two will tell you everything else you need to fix.</p>
+  </div>
+
+  <nav class="related" aria-label="Related posts">
+    <b>Keep reading</b>
+    <ul>
+      <li><a href="/blog/ai-sre-agents-incident-response/">AI SRE agents on call: an autonomy ladder for incident response</a><span>What an AI agent should be allowed to do during an incident, level by level, with OPA-gated actions and a 90-day rollout plan.</span></li>
+      <li><a href="/blog/agentic-developer-platform-golden-paths/">From IDP to agentic developer platform: golden paths as contracts agents can run</a><span>Golden paths as contracts AI agents can call: Backstage MCP actions, Crossplane XRDs, deterministic gates and Kargo promotions.</span></li>
+    </ul>
+    <p class="hire">Hiring for platform, DevOps or SRE roles? <a href="/">See my work and experience</a> or <a href="/#contact">get in touch</a>.</p>
+  </nav>
+
+  <aside class="author" aria-label="About the author">
+    <span class="av" aria-hidden="true">AK</span>
+    <p><b>Arjun Kanojia</b> is a DevOps and Site Reliability Engineer at Deutsche Telekom Digital Labs, working with AWS, Kubernetes and Terraform. AWS Solutions Architect Professional and CKA. <a href="/">See his work</a> or <a href="https://linkedin.com/in/arjunkanojia" rel="noopener">connect on LinkedIn</a>.</p>
+  </aside>
+  <a class="back" href="/blog/">← All posts</a>
+</article>
+</main>
+
+<footer><div class="wrap"><span>© 2026 Arjun Kanojia</span><span><a href="/blog/feed.xml">RSS</a> · <a href="/">Portfolio</a></span></div></footer>
+</body>
+</html>
